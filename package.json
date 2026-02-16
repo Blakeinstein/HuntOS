@@ -14,6 +14,7 @@
 		"format": "prettier --write ."
 	},
 	"dependencies": {
+		"@lucide/svelte": "^0.564.0",
 		"better-sqlite3": "^11.7.0"
 	},
 	"devDependencies": {

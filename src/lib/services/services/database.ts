@@ -151,9 +151,13 @@ export class Database {
     `);
 
 		// Create default user if not exists
-		const userCount = this.get<{ count: number }>('SELECT COUNT(*) as count FROM users')?.count ?? 0;
+		const userCount =
+			this.get<{ count: number }>('SELECT COUNT(*) as count FROM users')?.count ?? 0;
 		if (userCount === 0) {
-			this.run('INSERT INTO users (name, email) VALUES (?, ?)', ['Default User', 'user@example.com']);
+			this.run('INSERT INTO users (name, email) VALUES (?, ?)', [
+				'Default User',
+				'user@example.com'
+			]);
 		}
 	}
 
@@ -161,14 +165,14 @@ export class Database {
 	 * Run a statement (INSERT, UPDATE, DELETE)
 	 */
 	run(sql: string, params?: any[]): sqlite3.RunResult {
-		return this.db.prepare(sql).run(params);
+		return this.db.prepare(sql).run(...(params ?? []));
 	}
 
 	/**
 	 * Get a single row
 	 */
 	get<T = any>(sql: string, params?: any[]): T | null {
-		const result = this.db.prepare(sql).get(params);
+		const result = this.db.prepare(sql).get(...(params ?? []));
 		return result as T | null;
 	}
 
@@ -176,7 +180,7 @@ export class Database {
 	 * Get all rows
 	 */
 	all<T = any>(sql: string, params?: any[]): T[] {
-		return this.db.prepare(sql).all(params) as T[];
+		return this.db.prepare(sql).all(...(params ?? [])) as T[];
 	}
 
 	/**
