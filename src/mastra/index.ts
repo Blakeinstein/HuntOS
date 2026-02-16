@@ -5,13 +5,16 @@ import { Mastra } from '@mastra/core';
 import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import { createProfileAgent } from './agents/profile-agent';
+import { createJobBoardAgent } from './agents/job-board-agent';
 
 const services = createServices(db);
 
 const profileAgent = createProfileAgent(services.profileService);
+const jobBoardAgent = createJobBoardAgent();
 
 export const mastra = new Mastra({
 	agents: {
-		'profile-agent': profileAgent
+		'profile-agent': profileAgent,
+		'job-board-agent': jobBoardAgent
 	}
 });

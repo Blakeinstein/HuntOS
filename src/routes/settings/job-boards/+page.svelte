@@ -15,6 +15,7 @@
 		RefreshCwIcon,
 		SearchIcon
 	} from '@lucide/svelte';
+	import ScrapeButton from '$lib/components/ScrapeButton.svelte';
 
 	let { data } = $props();
 	const jobBoards = $derived(data.jobBoards ?? []);
@@ -156,6 +157,7 @@
 						class="rounded-lg border border-surface-200-800 bg-surface-100-900 p-4 transition-all hover:border-surface-300-700"
 						class:opacity-50={!board.is_enabled}
 					>
+						<!-- Main content row -->
 						<div class="flex items-start justify-between gap-4">
 							<div class="min-w-0 flex-1">
 								<!-- Board name + status -->
@@ -251,6 +253,9 @@
 								{/if}
 							</div>
 						</div>
+
+						<!-- Scrape button — full width below the main row -->
+						<ScrapeButton boardId={board.id} disabled={!board.is_enabled} />
 					</div>
 				{/each}
 			</div>
