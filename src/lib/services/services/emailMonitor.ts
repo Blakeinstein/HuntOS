@@ -99,11 +99,11 @@ export class EmailMonitorService {
 
 		if (isDefault) {
 			await this.db.run(`UPDATE email_accounts SET is_default = 0 WHERE id != ?`, [
-				result.lastID
+				result.lastInsertRowid
 			]);
 		}
 
-		return result.lastID;
+		return Number(result.lastInsertRowid);
 	}
 
 	/**
@@ -261,13 +261,9 @@ export class EmailMonitorService {
 			);
 			const result = await this.db.run(
 				`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 1, ?, datetime('now'))`,
-				[
-					statusUpdate.status,
-					`${statusUpdate.status} applications`,
-					(maxOrder?.max || 0) + 1
-				]
+				[statusUpdate.status, `${statusUpdate.status} applications`, (maxOrder?.max || 0) + 1]
 			);
-			swimlane = { id: result.lastID };
+			swimlane = { id: Number(result.lastInsertRowid) };
 		}
 
 		await this.db.run(

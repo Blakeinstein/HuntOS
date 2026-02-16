@@ -58,7 +58,7 @@ export class SwimlaneService {
       ORDER BY a.created_at DESC
     `,
 			[swimlaneId]
-		) as Promise<SwimlaneApplication[]>;
+		) as SwimlaneApplication[];
 	}
 
 	/**
@@ -73,7 +73,7 @@ export class SwimlaneService {
 			[name, description || null, orderIndex]
 		);
 
-		return result.lastID;
+		return Number(result.lastInsertRowid);
 	}
 
 	/**

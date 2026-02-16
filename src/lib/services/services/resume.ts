@@ -27,10 +27,7 @@ export class ResumeService {
 	/**
 	 * Generate a tailored resume
 	 */
-	async generateResume(
-		jobDescription: string,
-		customProfile?: ProfileData
-	): Promise<string> {
+	async generateResume(jobDescription: string, customProfile?: ProfileData): Promise<string> {
 		const profile = customProfile || (await this.profileService.getProfile());
 
 		const resumeContent = this.createResumeMarkdown(profile, jobDescription);
@@ -54,7 +51,7 @@ export class ResumeService {
 			[applicationId, content, jobDescriptionHash]
 		);
 
-		return result.lastID;
+		return Number(result.lastInsertRowid);
 	}
 
 	/**
@@ -71,10 +68,9 @@ export class ResumeService {
 	 * Get all resume versions for application
 	 */
 	async getResumeHistory(applicationId: number): Promise<Resume[]> {
-		return this.db.all(
-			`SELECT * FROM resumes WHERE application_id = ? ORDER BY created_at DESC`,
-			[applicationId]
-		);
+		return this.db.all(`SELECT * FROM resumes WHERE application_id = ? ORDER BY created_at DESC`, [
+			applicationId
+		]);
 	}
 
 	/**
@@ -172,7 +168,10 @@ ${Array.isArray(profile.languages) ? profile.languages.join(', ') : profile.lang
 		const years = (profile.experience as string)?.match(/\d+/)?.[0] || '5';
 		const skills = Array.isArray(profile.skills)
 			? profile.skills.slice(0, 3).join(', ')
-			: String(profile.skills || '').split(',').slice(0, 3).join(', ');
+			: String(profile.skills || '')
+					.split(',')
+					.slice(0, 3)
+					.join(', ');
 
 		return `Results-driven professional with ${years}+ years of experience in ${skills}. Proven track record of delivering high-quality results in fast-paced environments. Skilled in leveraging technical expertise and industry knowledge to drive business growth and operational excellence.`;
 	}

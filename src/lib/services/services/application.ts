@@ -33,6 +33,7 @@ export interface ApplicationHistory {
 	id: number;
 	application_id: number;
 	swimlane_id: number;
+	swimlane_name?: string;
 	changed_by: 'system' | 'user' | 'email_monitor';
 	reason?: string;
 	created_at: string;
@@ -167,10 +168,10 @@ export class ApplicationService {
 		// Log history entry
 		await this.db.run(
 			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, 'system', 'Application created', datetime('now'))`,
-			[result.lastID, defaultSwimlaneId]
+			[result.lastInsertRowid, defaultSwimlaneId]
 		);
 
-		return result.lastID;
+		return Number(result.lastInsertRowid);
 	}
 
 	/**
@@ -259,9 +260,7 @@ export class ApplicationService {
 	 * Get default backlog swimlane ID
 	 */
 	private async getDefaultBacklogSwimlaneId(): Promise<number> {
-		const swimlane = await this.db.get(
-			`SELECT id FROM swimlanes WHERE name = 'Backlog' LIMIT 1`
-		);
+		const swimlane = await this.db.get(`SELECT id FROM swimlanes WHERE name = 'Backlog' LIMIT 1`);
 		if (!swimlane) {
 			throw new Error('Default "Backlog" swimlane not found. Run database initialization.');
 		}

@@ -8,26 +8,36 @@ import { db } from '$lib/db';
 const services = createServices(db);
 
 export async function GET() {
-  try {
-    const profile = await services.profileService.getProfile();
-    return json(profile);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to fetch profile';
-    return json({ error: message }, { status: 500 });
-  }
+	try {
+		const profile = await services.profileService.getProfile();
+		return json(profile);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to fetch profile';
+		return json({ error: message }, { status: 500 });
+	}
 }
 
 export async function PUT({ request }) {
-  try {
-    const data = await request.json();
+	try {
+		const data = await request.json();
 
-    for (const [key, value] of Object.entries(data)) {
-      await services.profileService.updateProfile(key as any, value);
-    }
+		for (const [key, value] of Object.entries(data)) {
+			if (typeof value === 'string') {
+				await services.profileService.updateProfile(key as any, value);
+				continue;
+			}
 
-    return json({ success: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update profile';
-    return json({ error: message }, { status: 500 });
-  }
+			if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+				await services.profileService.updateProfile(key as any, value);
+				continue;
+			}
+
+			return json({ error: `Invalid value for ${key}` }, { status: 400 });
+		}
+
+		return json({ success: true });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to update profile';
+		return json({ error: message }, { status: 500 });
+	}
 }
