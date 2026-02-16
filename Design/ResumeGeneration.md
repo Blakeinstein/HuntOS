@@ -8,7 +8,7 @@ This document details the design for the Resume Generation feature. The purpose 
 
 ### 2.1. Dynamic Content Tailoring
 
--   **LLM-Powered:** The system will use an LLM (via Copilot Kit) to analyze a job description and compare it against the user's master profile.
+-   **LLM-Powered:** The system will use an LLM (via Mastra) to analyze a job description and compare it against the user's master profile.
 -   **Keyword Optimization:** The LLM will identify key skills, technologies, and qualifications mentioned in the job description and ensure they are appropriately reflected in the generated resume.
 -   **Experience Highlighting:** The service will rephrase or reorder bullet points from the user's work experience to better align with the requirements of the target role.
 

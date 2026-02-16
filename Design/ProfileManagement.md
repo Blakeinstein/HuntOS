@@ -8,7 +8,7 @@ This document details the design of the Profile Management feature. The primary 
 
 ### 2.1. LLM-Powered Profile Building
 
--   **Conversational Interface:** The main feature is a chat interface where the user can converse with an LLM (via Copilot Kit) to build their profile. The LLM will guide the user by asking targeted questions about their work experience, education, skills, contact information, and other relevant details.
+-   **Conversational Interface:** The main feature is a chat interface where the user can converse with an LLM (via Mastra) to build their profile. The LLM will guide the user by asking targeted questions about their work experience, education, skills, contact information, and other relevant details.
 -   **Natural Language Understanding:** The system will parse the user's responses to extract structured data. For example, if a user describes a past job, the LLM should identify the company name, job title, dates of employment, and key responsibilities.
 
 ### 2.2. Structured Profile Data
@@ -63,9 +63,9 @@ The profile data will be stored in a simple key-value table, which provides flex
     -   `ProfileForm.svelte`: A form that displays the structured profile data and allows for manual editing.
 -   **State Management:** A Svelte store will hold the profile data on the client, ensuring the UI is reactive to changes from both the chat interface and the manual form.
 
-### 3.4. LLM Integration (Copilot Kit)
+### 3.4. LLM Integration (Mastra)
 
--   The chat interface will use the Copilot Kit to stream responses from the LLM.
+-   The chat interface will use Mastra agents with AI SDK UI to stream responses from the LLM.
 -   A backend "tool" or function will be defined for the LLM to call, named something like `updateUserProfile`.
 -   **Flow:**
     1.  User types a message (e.g., "I worked at Acme Corp as a software engineer").

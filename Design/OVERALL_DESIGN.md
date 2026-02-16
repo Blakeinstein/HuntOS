@@ -1,7 +1,7 @@
 Give me an agentic `Design.md` defining a service that allows automating job applications. The document should help LLM's implement the entire working product. The tech stack for the app is as follows.
 
 1. Svelte-KIT (For serving the web app and performing backend tasks)
-2. Copilot KIT (For interacting with an LLM and running browser tasks)
+2. Mastra (For interacting with an LLM via AI agents and tools)
 3. agent-browser (For automating a job application on a browser)
 4. Skeleton UI (For UI elements) 
 

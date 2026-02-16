@@ -53,7 +53,7 @@ This document outlines the design for the Email Automation feature. Its purpose 
 2.  It connects to the user's email account using the stored credentials.
 3.  It fetches unread emails or emails received since the last check.
 4.  For each email, it performs a quick pre-filtering check based on keywords or sender domains matching companies in the `applications` table.
-5.  If an email seems relevant, its content is passed to the LLM via Copilot Kit.
+5.  If an email seems relevant, its content is passed to the LLM via a Mastra agent.
 6.  The prompt for the LLM will include the email content and a list of available swimlanes. The prompt will ask the LLM to return the name of the most appropriate swimlane and the ID of the application it relates to.
 7.  If the LLM returns a valid swimlane and application ID, the `applicationService` is called to update the application's status.
 

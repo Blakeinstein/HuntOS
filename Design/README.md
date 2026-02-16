@@ -39,7 +39,7 @@ This section provides a high-level overview of what has been implemented versus 
     -   **[❌] Notes:** This is one of the least implemented features. The service (`jobBoard.ts`) and UI exist as placeholders. The actual scraping logic using `agent-browser` has not been built. The scheduling mechanism is also not implemented.
 
 -   **Browser Automation:**
-    -   **[❌] Notes:** The `browserAgent.ts` service is a placeholder. No integration with `agent-browser` or Copilot Kit has been done. This is a core component that requires significant implementation work.
+    -   **[❌] Notes:** The `browserAgent.ts` service is a placeholder. No integration with `agent-browser` or Mastra has been done. This is a core component that requires significant implementation work.
 
 -   **Email Automation:**
     -   **[✅] Basic UI:** A settings page to connect email accounts exists.

@@ -4,9 +4,9 @@
 			"command": "bunx",
 			"args": ["-y", "@sveltejs/mcp"]
 		},
-		"CopilotKit MCP": {
+		"mastra": {
 			"command": "bunx",
-			"args": ["mcp-remote", "https://mcp.copilotkit.ai"]
+			"args": ["-y", "@mastra/mcp-docs-server@latest"]
 		}
 	}
 }

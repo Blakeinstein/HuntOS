@@ -341,7 +341,7 @@
 						profile automatically.
 					</p>
 					<p class="mt-4 text-xs opacity-40">
-						This feature requires Copilot Kit integration and is not yet implemented.
+						This feature requires Mastra integration and is not yet implemented.
 					</p>
 					<button type="button" class="mt-4 btn preset-tonal" disabled> Coming Soon </button>
 				</div>

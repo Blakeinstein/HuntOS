@@ -21,7 +21,7 @@ This document defines the architecture and implementation plan for an automated 
 | Framework | SvelteKit | Full-stack web application framework |
 | UI Library | Skeleton UI | Pre-built component library |
 | Browser Automation | agent-browser | Job application form filling |
-| LLM Integration | Copilot KIT | Conversational interface and decision making |
+| LLM Integration | Mastra | AI agent framework for conversational interface and decision making |
 | Database | SQLite | Lightweight file-based database |
 | Email | IMAP/SMTP | Email monitoring and sending |
 | Styling | Tailwind CSS 4 | Utility-first CSS framework |
@@ -536,7 +536,7 @@ export class ApplicationAgent {
 
 ---
 
-## LLM Integration (Copilot KIT)
+## LLM Integration (Mastra)
 
 ### Profile Understanding
 
