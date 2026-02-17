@@ -7,6 +7,7 @@
 		KanbanIcon,
 		UserIcon,
 		SettingsIcon,
+		ScrollTextIcon,
 		BriefcaseIcon,
 		PanelLeftCloseIcon,
 		PanelLeftOpenIcon
@@ -19,6 +20,7 @@
 	const navLinks = [
 		{ label: 'Roadmap', href: '/applications', icon: KanbanIcon },
 		{ label: 'Profiles', href: '/profiles', icon: UserIcon },
+		{ label: 'Audit Log', href: '/audit', icon: ScrollTextIcon },
 		{ label: 'Settings', href: '/settings', icon: SettingsIcon }
 	];
 

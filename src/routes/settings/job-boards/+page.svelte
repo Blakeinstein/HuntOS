@@ -13,7 +13,10 @@
 		PauseIcon,
 		CalendarIcon,
 		RefreshCwIcon,
-		SearchIcon
+		SearchIcon,
+		ListIcon,
+		DatabaseIcon,
+		BookmarkIcon
 	} from '@lucide/svelte';
 	import ScrapeButton from '$lib/components/ScrapeButton.svelte';
 
@@ -23,7 +26,9 @@
 	let formState = $state({
 		name: '',
 		baseUrl: '',
-		checkIntervalMinutes: '1440'
+		checkIntervalMinutes: '1440',
+		maxListingsPerScrape: '25',
+		pageRetentionDays: '3'
 	});
 
 	let isAdding = $state(false);
@@ -39,11 +44,19 @@
 				body: JSON.stringify({
 					name: formState.name,
 					baseUrl: formState.baseUrl,
-					checkIntervalMinutes: Number(formState.checkIntervalMinutes)
+					checkIntervalMinutes: Number(formState.checkIntervalMinutes),
+					maxListingsPerScrape: Number(formState.maxListingsPerScrape),
+					pageRetentionDays: Number(formState.pageRetentionDays)
 				})
 			});
 
-			formState = { name: '', baseUrl: '', checkIntervalMinutes: '1440' };
+			formState = {
+				name: '',
+				baseUrl: '',
+				checkIntervalMinutes: '1440',
+				maxListingsPerScrape: '25',
+				pageRetentionDays: '3'
+			};
 			showForm = false;
 			await invalidate('db:job-boards');
 		} finally {
@@ -100,6 +113,28 @@
 		{ value: '1440', label: 'Every day' },
 		{ value: '10080', label: 'Every week' }
 	];
+
+	const maxListingsOptions = [
+		{ value: '10', label: '10 listings' },
+		{ value: '25', label: '25 listings' },
+		{ value: '50', label: '50 listings' },
+		{ value: '75', label: '75 listings' },
+		{ value: '100', label: '100 listings' }
+	];
+
+	const retentionOptions = [
+		{ value: '1', label: '1 day' },
+		{ value: '2', label: '2 days' },
+		{ value: '3', label: '3 days' },
+		{ value: '5', label: '5 days' },
+		{ value: '7', label: '7 days' },
+		{ value: '14', label: '14 days' }
+	];
+
+	function formatRetentionLabel(days: number): string {
+		if (days === 1) return '1 day retention';
+		return `${days} day retention`;
+	}
 </script>
 
 <div class="mx-auto max-w-3xl space-y-6">
@@ -200,9 +235,23 @@
 										{formatIntervalLabel(board.check_interval_minutes)}
 									</span>
 									<span class="inline-flex items-center gap-1">
+										<ListIcon class="size-3" />
+										Max {board.max_listings_per_scrape} per scrape
+									</span>
+									<span class="inline-flex items-center gap-1">
+										<DatabaseIcon class="size-3" />
+										{formatRetentionLabel(board.page_retention_days)}
+									</span>
+									<span class="inline-flex items-center gap-1">
 										<CalendarIcon class="size-3" />
 										Last checked: {formatLastChecked(board.last_checked)}
 									</span>
+									{#if board.last_scraped_page}
+										<span class="inline-flex items-center gap-1">
+											<BookmarkIcon class="size-3" />
+											Resumes at page {board.last_scraped_page}
+										</span>
+									{/if}
 									{#if board.next_check}
 										<span class="inline-flex items-center gap-1">
 											<RefreshCwIcon class="size-3" />
@@ -320,19 +369,47 @@
 					</label>
 				</div>
 
-				<!-- Check interval -->
-				<label class="label max-w-sm">
-					<span class="flex items-center gap-1.5 text-sm font-medium">
-						<ClockIcon class="size-3.5 opacity-50" />
-						Check Interval
-					</span>
-					<select class="select mt-1" bind:value={formState.checkIntervalMinutes}>
-						{#each intervalOptions as opt (opt.value)}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
-					<p class="mt-0.5 text-xs opacity-40">How often to scan this board for new postings.</p>
-				</label>
+				<!-- Check interval + Max listings + Retention -->
+				<div class="grid gap-4 md:grid-cols-3">
+					<label class="label">
+						<span class="flex items-center gap-1.5 text-sm font-medium">
+							<ClockIcon class="size-3.5 opacity-50" />
+							Check Interval
+						</span>
+						<select class="select mt-1" bind:value={formState.checkIntervalMinutes}>
+							{#each intervalOptions as opt (opt.value)}
+								<option value={opt.value}>{opt.label}</option>
+							{/each}
+						</select>
+						<p class="mt-0.5 text-xs opacity-40">How often to scan this board.</p>
+					</label>
+
+					<label class="label">
+						<span class="flex items-center gap-1.5 text-sm font-medium">
+							<ListIcon class="size-3.5 opacity-50" />
+							Max Listings per Scrape
+						</span>
+						<select class="select mt-1" bind:value={formState.maxListingsPerScrape}>
+							{#each maxListingsOptions as opt (opt.value)}
+								<option value={opt.value}>{opt.label}</option>
+							{/each}
+						</select>
+						<p class="mt-0.5 text-xs opacity-40">Cap on jobs collected per session.</p>
+					</label>
+
+					<label class="label">
+						<span class="flex items-center gap-1.5 text-sm font-medium">
+							<DatabaseIcon class="size-3.5 opacity-50" />
+							Page Retention
+						</span>
+						<select class="select mt-1" bind:value={formState.pageRetentionDays}>
+							{#each retentionOptions as opt (opt.value)}
+								<option value={opt.value}>{opt.label}</option>
+							{/each}
+						</select>
+						<p class="mt-0.5 text-xs opacity-40">Resume from last page within this window.</p>
+					</label>
+				</div>
 
 				<!-- Actions -->
 				<div class="flex justify-end gap-2 border-t border-surface-200-800 pt-4">

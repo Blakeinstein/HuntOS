@@ -14,7 +14,8 @@
 		"format": "prettier --write .",
 		"browser": "google-chrome-stable --remote-debugging-port=9222 --user-data-dir=./data/chrome",
 		"cdp": "agent-browser connect 9222",
-		"studio": "mastra studio --server-port 5173"
+		"studio": "mastra studio --server-port 5173",
+		"ab": "agent-browser"
 	},
 	"dependencies": {
 		"@ai-sdk/svelte": "^4.0.86",

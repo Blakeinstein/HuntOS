@@ -8,7 +8,29 @@ export interface JobBoardConfig {
 	last_checked?: string;
 	next_check?: string;
 	is_enabled: boolean;
+	max_listings_per_scrape: number;
+	last_scraped_page?: number;
+	last_scraped_page_url?: string;
+	last_page_scraped_at?: string;
+	page_retention_days: number;
 	created_at: string;
+}
+
+/**
+ * Pagination state resolved for a scrape session.
+ *
+ * The scraper service calls `resolvePaginationState()` to get this before
+ * each scrape. If the last-page bookmark has expired (older than
+ * `page_retention_days`), the state resets so the scrape starts from the
+ * beginning.
+ */
+export interface PaginationState {
+	/** The page number to resume from (1-based), or `null` to start fresh. */
+	resumePage: number | null;
+	/** The URL of the last scraped page, or `null` when starting fresh. */
+	resumePageUrl: string | null;
+	/** Maximum number of job listings to collect in this scrape session. */
+	maxListings: number;
 }
 
 export interface JobBoardCredentials {
@@ -25,8 +47,8 @@ export interface JobPosting {
 	job_board_id: number;
 	title: string;
 	company: string;
-	location?: string;
-	salary_range?: string;
+	location?: string | null;
+	salary_range?: string | null;
 	job_description_url: string;
 	job_description?: string;
 	posted_at: string;
@@ -73,16 +95,24 @@ export class JobBoardService {
 		name: string;
 		baseUrl: string;
 		checkIntervalMinutes?: number;
+		maxListingsPerScrape?: number;
+		pageRetentionDays?: number;
 		searchQueries?: string[];
 	}): Promise<number> {
-		const { name, baseUrl, checkIntervalMinutes = 1440 } = config;
+		const {
+			name,
+			baseUrl,
+			checkIntervalMinutes = 1440,
+			maxListingsPerScrape = 25,
+			pageRetentionDays = 3
+		} = config;
 
 		const result = await this.db.run(
 			`
-      INSERT INTO job_boards (name, base_url, check_interval_minutes, last_checked, next_check, is_enabled, created_at)
-      VALUES (?, ?, ?, NULL, datetime('now'), 1, datetime('now'))
+      INSERT INTO job_boards (name, base_url, check_interval_minutes, max_listings_per_scrape, page_retention_days, last_checked, next_check, is_enabled, created_at)
+      VALUES (?, ?, ?, ?, ?, NULL, datetime('now'), 1, datetime('now'))
       `,
-			[name, baseUrl, checkIntervalMinutes]
+			[name, baseUrl, checkIntervalMinutes, maxListingsPerScrape, pageRetentionDays]
 		);
 
 		return Number(result.lastInsertRowid);
@@ -115,6 +145,16 @@ export class JobBoardService {
 			values.push(config.is_enabled);
 		}
 
+		if (config.max_listings_per_scrape !== undefined) {
+			updates.push('max_listings_per_scrape = ?');
+			values.push(config.max_listings_per_scrape);
+		}
+
+		if (config.page_retention_days !== undefined) {
+			updates.push('page_retention_days = ?');
+			values.push(config.page_retention_days);
+		}
+
 		if (updates.length === 0) return;
 
 		values.push(id);
@@ -142,6 +182,68 @@ export class JobBoardService {
 			nextCheck,
 			id
 		]);
+	}
+
+	/**
+	 * Update the pagination bookmark after a successful scrape.
+	 *
+	 * @param id        - The job board ID.
+	 * @param page      - The 1-based page number that was last scraped.
+	 * @param pageUrl   - The full URL of that page (with any pagination query params).
+	 */
+	async updatePaginationState(id: number, page: number, pageUrl: string): Promise<void> {
+		await this.db.run(
+			`UPDATE job_boards SET last_scraped_page = ?, last_scraped_page_url = ?, last_page_scraped_at = datetime('now') WHERE id = ?`,
+			[page, pageUrl, id]
+		);
+	}
+
+	/**
+	 * Clear the pagination bookmark so the next scrape starts from page 1.
+	 */
+	async resetPaginationState(id: number): Promise<void> {
+		await this.db.run(
+			`UPDATE job_boards SET last_scraped_page = NULL, last_scraped_page_url = NULL, last_page_scraped_at = NULL WHERE id = ?`,
+			[id]
+		);
+	}
+
+	/**
+	 * Resolve the pagination state for a scrape session.
+	 *
+	 * If the last-page bookmark exists but is older than the configured
+	 * `page_retention_days`, it is treated as expired and the scrape
+	 * will start from the beginning.
+	 */
+	async resolvePaginationState(id: number): Promise<PaginationState> {
+		const board = await this.getJobBoard(id);
+		if (!board) {
+			return { resumePage: null, resumePageUrl: null, maxListings: 25 };
+		}
+
+		const maxListings = board.max_listings_per_scrape;
+
+		// No bookmark at all — start fresh
+		if (!board.last_scraped_page || !board.last_page_scraped_at) {
+			return { resumePage: null, resumePageUrl: null, maxListings };
+		}
+
+		// Check retention expiry
+		const scrapedAt = new Date(board.last_page_scraped_at).getTime();
+		const retentionMs = board.page_retention_days * 24 * 60 * 60 * 1000;
+		const isExpired = Date.now() - scrapedAt > retentionMs;
+
+		if (isExpired) {
+			// Clear stale bookmark so subsequent reads also see a clean state
+			await this.resetPaginationState(id);
+			return { resumePage: null, resumePageUrl: null, maxListings };
+		}
+
+		return {
+			resumePage: board.last_scraped_page,
+			resumePageUrl: board.last_scraped_page_url ?? null,
+			maxListings
+		};
 	}
 
 	/**

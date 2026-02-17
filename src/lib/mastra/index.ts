@@ -7,7 +7,13 @@ import { Observability, DefaultExporter, SamplingStrategyType } from '@mastra/ob
 import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import { createProfileAgent } from './agents/profile-agent';
-import { createJobBoardAgent } from './agents/job-board-agent';
+import {
+	createJobBoardAgent,
+	createJobBoardSubAgentRegistry,
+	createLinkedInAgent,
+	createGreenhouseAgent,
+	createGenericAgent
+} from './agents/job-board-agent/index';
 import { logger } from './logger';
 
 const services = createServices(db);
@@ -15,10 +21,21 @@ const services = createServices(db);
 const profileAgent = createProfileAgent(services.profileService);
 const jobBoardAgent = createJobBoardAgent();
 
+// Site-specific sub-agents — each is registered with dot-notation keys
+const linkedInAgent = createLinkedInAgent();
+const greenhouseAgent = createGreenhouseAgent();
+const genericAgent = createGenericAgent();
+
+// Sub-agent registry for URL-based routing at runtime
+const subAgentRegistry = createJobBoardSubAgentRegistry();
+
 export const mastra = new Mastra({
 	agents: {
 		'profile-agent': profileAgent,
-		'job-board-agent': jobBoardAgent
+		'job-board-agent': jobBoardAgent,
+		'job-board-agent.linkedin': linkedInAgent,
+		'job-board-agent.greenhouse': greenhouseAgent,
+		'job-board-agent.generic': genericAgent
 	},
 	storage: new LibSQLStore({
 		id: 'libsql-storage',
@@ -37,6 +54,6 @@ export const mastra = new Mastra({
 });
 
 // Wire late-bound services that depend on the Mastra instance
-services.withMastra(mastra);
+services.withMastra(mastra, subAgentRegistry);
 
-export { services };
+export { services, subAgentRegistry };

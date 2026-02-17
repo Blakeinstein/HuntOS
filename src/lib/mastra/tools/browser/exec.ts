@@ -30,7 +30,7 @@ export async function browserExec(
 	const fullArgs = ['--cdp', cdpPort, ...(json ? ['--json'] : []), ...args];
 
 	try {
-		const { stdout, stderr } = await execFileAsync('npx', ['agent-browser', ...fullArgs], {
+		const { stdout, stderr } = await execFileAsync('bunx', ['agent-browser', ...fullArgs], {
 			timeout,
 			maxBuffer: 10 * 1024 * 1024, // 10 MB for screenshots / snapshots
 			env: { ...process.env }

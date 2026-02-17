@@ -105,6 +105,11 @@ export class Database {
         last_checked DATETIME,
         next_check DATETIME,
         is_enabled BOOLEAN DEFAULT 1,
+        max_listings_per_scrape INTEGER NOT NULL DEFAULT 25,
+        last_scraped_page INTEGER,
+        last_scraped_page_url TEXT,
+        last_page_scraped_at DATETIME,
+        page_retention_days INTEGER NOT NULL DEFAULT 3,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -148,7 +153,43 @@ export class Database {
         FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
         FOREIGN KEY (swimlane_id) REFERENCES swimlanes(id)
       );
+
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,          -- 'scrape', 'browser', 'resume', 'agent'
+        agent_id TEXT,                   -- e.g. 'job-board-agent.linkedin'
+        status TEXT NOT NULL DEFAULT 'info', -- 'info', 'success', 'warning', 'error'
+        title TEXT NOT NULL,             -- short summary line
+        detail TEXT,                     -- longer message / JSON payload
+        meta TEXT,                       -- JSON blob for structured data (job board id, url, counts, etc.)
+        duration_ms INTEGER,            -- how long the operation took
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_status ON audit_logs(status);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
     `);
+
+		// ── Migrations for existing databases ───────────────────────────
+		// SQLite's CREATE TABLE IF NOT EXISTS won't add new columns to an
+		// already-existing table, so we use ALTER TABLE with a try/catch
+		// (duplicate column throws an error we can safely ignore).
+		const migrations = [
+			`ALTER TABLE job_boards ADD COLUMN max_listings_per_scrape INTEGER NOT NULL DEFAULT 25`,
+			`ALTER TABLE job_boards ADD COLUMN last_scraped_page INTEGER`,
+			`ALTER TABLE job_boards ADD COLUMN last_scraped_page_url TEXT`,
+			`ALTER TABLE job_boards ADD COLUMN last_page_scraped_at DATETIME`,
+			`ALTER TABLE job_boards ADD COLUMN page_retention_days INTEGER NOT NULL DEFAULT 3`
+		];
+
+		for (const sql of migrations) {
+			try {
+				this.db.exec(sql);
+			} catch {
+				// Column already exists — safe to ignore
+			}
+		}
 
 		// Create default user if not exists
 		const userCount =

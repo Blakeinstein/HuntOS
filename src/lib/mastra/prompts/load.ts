@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { resolve, dirname, basename } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve, dirname, basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -11,6 +11,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Follows the Mastra "prompt registry" pattern so agents can fetch
  * prompts at runtime — including dynamic context injection — without
  * hard-coding instructions in code.
+ *
+ * ## Nested Resolution (dot-notation)
+ *
+ * Prompt IDs that contain dots are resolved using a folder-based lookup:
+ *
+ * 1. `job-board-agent` → `job-board-agent.md` (flat, top-level)
+ * 2. `job-board-agent.linkedin` → `job-board-agent/job-board-agent.linkedin.md` (nested)
+ *
+ * The prefix before the first dot is used as the subfolder name. This keeps
+ * related prompts grouped while allowing dot-notation agent IDs.
  *
  * @see https://mastra.ai/docs/server/request-context#fetching-from-a-prompt-registry
  */
@@ -65,6 +75,11 @@ class PromptRegistry {
 	 *     'User Profile': JSON.stringify(profileData, null, 2),
 	 *   },
 	 * });
+	 *
+	 * // Nested prompt (dot-notation resolves to subfolder)
+	 * const { content } = promptRegistry.getPrompt({
+	 *   promptId: 'job-board-agent.linkedin',
+	 * });
 	 * ```
 	 */
 	getPrompt({ promptId, context }: GetPromptOptions): PromptResult {
@@ -84,16 +99,11 @@ class PromptRegistry {
 	}
 
 	/**
-	 * List all available prompt IDs (scanned from .md files in the prompts directory).
+	 * List all available prompt IDs (scanned from .md files in the prompts
+	 * directory, including nested subdirectories).
 	 */
 	listPrompts(): string[] {
-		try {
-			return readdirSync(this.promptDir)
-				.filter((f) => f.endsWith('.md'))
-				.map((f) => basename(f, '.md'));
-		} catch {
-			return [];
-		}
+		return this.scanDir(this.promptDir);
 	}
 
 	/**
@@ -116,13 +126,93 @@ class PromptRegistry {
 	}
 
 	/**
+	 * Recursively scan a directory for `.md` files and return prompt IDs.
+	 */
+	private scanDir(dir: string): string[] {
+		const ids: string[] = [];
+		try {
+			const entries = readdirSync(dir);
+			for (const entry of entries) {
+				const fullPath = join(dir, entry);
+				try {
+					const stat = statSync(fullPath);
+					if (stat.isDirectory()) {
+						ids.push(...this.scanDir(fullPath));
+					} else if (entry.endsWith('.md')) {
+						ids.push(basename(entry, '.md'));
+					}
+				} catch {
+					// skip unreadable entries
+				}
+			}
+		} catch {
+			// directory doesn't exist or isn't readable
+		}
+		return ids;
+	}
+
+	/**
+	 * Resolve a prompt ID to its file path on disk.
+	 *
+	 * Resolution order:
+	 * 1. Flat: `{promptDir}/{promptId}.md`
+	 * 2. Nested: `{promptDir}/{prefix}/{promptId}.md`
+	 *    where `prefix` is the segment before the first dot.
+	 *
+	 * This allows `job-board-agent.linkedin` to resolve to
+	 * `prompts/job-board-agent/job-board-agent.linkedin.md`.
+	 */
+	private resolvePath(promptId: string): string {
+		// Try flat path first
+		const flatPath = resolve(this.promptDir, `${promptId}.md`);
+		try {
+			statSync(flatPath);
+			return flatPath;
+		} catch {
+			// flat path doesn't exist, try nested
+		}
+
+		// Try nested path: use prefix before first dot as subfolder
+		const dotIndex = promptId.indexOf('.');
+		if (dotIndex !== -1) {
+			const prefix = promptId.substring(0, dotIndex);
+			const nestedPath = resolve(this.promptDir, prefix, `${promptId}.md`);
+			try {
+				statSync(nestedPath);
+				return nestedPath;
+			} catch {
+				// nested path doesn't exist either
+			}
+		}
+
+		// Also try using the full promptId as a subfolder name (no dots)
+		// e.g. `job-board-agent` → `job-board-agent/job-board-agent.md`
+		const folderPath = resolve(this.promptDir, promptId, `${promptId}.md`);
+		try {
+			statSync(folderPath);
+			return folderPath;
+		} catch {
+			// none of the paths resolved
+		}
+
+		throw new Error(
+			`Prompt file not found for "${promptId}". Searched:\n` +
+				`  - ${flatPath}\n` +
+				(dotIndex !== -1
+					? `  - ${resolve(this.promptDir, promptId.substring(0, dotIndex), `${promptId}.md`)}\n`
+					: '') +
+				`  - ${folderPath}`
+		);
+	}
+
+	/**
 	 * Load the raw markdown content for a prompt ID, with caching.
 	 */
 	private loadBase(promptId: string): string {
 		const cached = this.cache.get(promptId);
 		if (cached !== undefined) return cached;
 
-		const promptPath = resolve(this.promptDir, `${promptId}.md`);
+		const promptPath = this.resolvePath(promptId);
 
 		try {
 			const content = readFileSync(promptPath, 'utf-8').trim();

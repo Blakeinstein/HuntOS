@@ -15,7 +15,7 @@ export const openrouter = createOpenRouter({
 });
 
 /** The default model used by all agents unless overridden. */
-const DEFAULT_MODEL = 'minimax/minimax-m2.5';
+const DEFAULT_MODEL = 'qwen/qwen3-30b-a3b-instruct-2507';
 
 /**
  * Dynamic context entries that get appended to the base prompt

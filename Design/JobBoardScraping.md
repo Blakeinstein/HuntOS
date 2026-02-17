@@ -35,6 +35,47 @@ This document describes the design of the Job Board Scraping feature. The goal i
 | `schedule` | TEXT | A cron string representing the scraping schedule (e.g., `0 9 * * *` for 9 AM daily). |
 | `isEnabled` | INTEGER | Boolean (0 or 1) to enable or disable scraping for this source. |
 | `lastRunAt` | TEXT | ISO 8601 timestamp of the last time the scraper ran for this source. |
+| `maxListingsPerScrape` | INTEGER | Maximum number of job listings to collect per scrape session. Default: `25`. |
+| `lastScrapedPage` | INTEGER | The 1-based page number the scraper last stopped on (nullable). |
+| `lastScrapedPageUrl` | TEXT | The full URL (with pagination query params) of the page the scraper last stopped on (nullable). |
+| `lastPageScrapedAt` | TEXT | ISO 8601 timestamp of when the pagination bookmark was saved (nullable). |
+| `pageRetentionDays` | INTEGER | Number of days to retain the pagination bookmark before resetting. Default: `3`. |
+
+### 3.1.1. Pagination & Resume Behaviour
+
+The scraper supports resuming from the last scraped page so that consecutive scrape sessions produce fresh results rather than re-scraping the same listings.
+
+#### How It Works
+
+1. **Before each scrape** the system calls `resolvePaginationState(jobBoardId)` which reads `lastScrapedPage`, `lastScrapedPageUrl`, and `lastPageScrapedAt` from the `JobBoard` row.
+2. **Retention check:** If `lastPageScrapedAt` is older than `pageRetentionDays`, the bookmark is considered stale (the job board has likely refreshed its listings). The bookmark is cleared and the scrape starts from page 1.
+3. **Resume or start fresh:** If the bookmark is still valid, the scraper navigates directly to `lastScrapedPageUrl` and begins extracting from there. Otherwise it uses the board's base `url`.
+4. **Listing cap:** The scraper (and the underlying agent prompt) enforce `maxListingsPerScrape`. Once enough listings have been collected the agent stops scrolling/paginating.
+5. **After each scrape** the agent reports `current_page` and `current_page_url` in its structured output. The system persists these as the new bookmark so the next session can pick up where this one left off.
+
+#### Configuration Defaults
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `maxListingsPerScrape` | 25 | Jobs collected per session before the agent stops. Configurable per board in the UI. |
+| `pageRetentionDays` | 3 | Days before the resume bookmark expires and the scrape resets to page 1. Configurable per board. |
+
+#### Pagination Context (Agent Side)
+
+A `PaginationContext` JSON object is injected into each scraping agent's dynamic context at runtime:
+
+```json
+{
+  "resume_page": 2,
+  "resume_page_url": "https://www.linkedin.com/jobs/search?keywords=typescript&start=25",
+  "max_listings": 25
+}
+```
+
+The agent is instructed to:
+- Navigate to `resume_page_url` (or the base URL if `null`).
+- Stop extracting once `max_listings` is reached.
+- Report `current_page` and `current_page_url` in its JSON response.
 
 ### 3.2. Backend Services & Logic
 
@@ -51,13 +92,13 @@ This document describes the design of the Job Board Scraping feature. The goal i
 2.  The system launches a headless browser instance using `agent-browser`.
 3.  **Authentication (Challenge):** The agent navigates to LinkedIn. It will need to be logged in to see full job details. This will likely require the user to provide a session cookie that the agent can inject into the browser instance. Storing this cookie securely is paramount.
 4.  The agent navigates to the `url` specified in the `JobBoard` entry.
-5.  The agent executes a script to:
-    -   Scroll down the list of jobs to ensure all are loaded.
-    -   For each job listing element in the page's HTML:
-        -   Extract the job title, company name, and the unique URL for the job posting.
-6.  For each extracted job URL, the system checks if an application with that URL already exists in the `applications` table.
-7.  If the job is new, the system calls the `applicationService` to create a new application record with the extracted details and places it in the `Backlog` swimlane.
-8.  The `lastRunAt` timestamp for the `JobBoard` is updated.
+5.  The system resolves the pagination state for this board (resume page or start fresh based on retention expiry).
+6.  A `PaginationContext` is built and injected into the agent's request context alongside the target URL and user profile.
+7.  The agent navigates to the resume URL (or the base URL if starting fresh) and extracts job listings, stopping once `maxListingsPerScrape` is reached.
+8.  For each extracted job URL, the system checks if an application with that URL already exists in the `applications` table.
+9.  If the job is new, the system calls the `applicationService` to create a new application record with the extracted details and places it in the `Backlog` swimlane.
+10. The `lastRunAt` timestamp for the `JobBoard` is updated.
+11. The pagination bookmark (`lastScrapedPage`, `lastScrapedPageUrl`, `lastPageScrapedAt`) is updated from the agent's reported `current_page` and `current_page_url`.
 
 ### 3.4. API Endpoints
 
@@ -69,7 +110,7 @@ This document describes the design of the Job Board Scraping feature. The goal i
 ### 3.5. Frontend (SvelteKit)
 
 -   **Route:** `/settings/job-boards` will provide the UI for managing scraping sources.
--   **Interface:** A form to add a new source (name, URL, schedule) and a list of existing sources with controls to edit, delete, or temporarily disable them.
+-   **Interface:** A form to add a new source (name, URL, schedule, max listings per scrape, page retention days) and a list of existing sources with controls to edit, delete, or temporarily disable them. Each board card displays the current pagination bookmark (e.g., "Resumes at page 3") and retention window.
 
 ## 4. Implementation Notes
 
