@@ -2,12 +2,7 @@
 // Job board search API endpoint — invokes the job-board-agent with dynamic URL + profile context
 
 import { json } from '@sveltejs/kit';
-import { createServices } from '$lib/services';
-import { db } from '$lib/db';
-import { mastra } from '../../../../../mastra';
-import { scrapeJobBoard } from '../../../../../mastra/agents/job-board-scraper';
-
-const services = createServices(db);
+import { services } from '../../../../../mastra';
 
 export async function POST({ params }) {
 	const jobBoardId = Number(params.id);
@@ -16,10 +11,12 @@ export async function POST({ params }) {
 		return json({ error: 'Invalid job board ID' }, { status: 400 });
 	}
 
+	if (!services.jobBoardScraperService) {
+		return json({ error: 'Scraper service not initialized' }, { status: 503 });
+	}
+
 	try {
-		const result = await scrapeJobBoard(mastra, services.profileService, services.jobBoardService, {
-			jobBoardId
-		});
+		const result = await services.jobBoardScraperService.scrape({ jobBoardId });
 
 		const status = result.success ? 200 : result.scrapeResult?.blocked ? 403 : 500;
 
