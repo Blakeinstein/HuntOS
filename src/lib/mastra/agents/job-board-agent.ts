@@ -1,4 +1,5 @@
 import { browserTools } from '../tools/browser';
+import { withToolLoggingAll } from '../tools/with-logging';
 import { createAgent } from './create-agent';
 import {
 	scrapeResultSchema,
@@ -42,7 +43,7 @@ export function createJobBoardAgent() {
 			'User Profile': `\`\`\`json\n${requestContext.get('user-profile') as JobBoardRequestContext['user-profile']}\n\`\`\``
 		}),
 		tools: {
-			...browserTools
+			...withToolLoggingAll(browserTools)
 		}
 	});
 }

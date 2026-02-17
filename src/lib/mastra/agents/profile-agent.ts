@@ -4,6 +4,7 @@ import {
 	createGetProfileTool,
 	createGetIncompleteFieldsTool
 } from '../tools/profile-tools';
+import { withToolLogging } from '../tools/with-logging';
 import { createAgent } from './create-agent';
 
 export function createProfileAgent(profileService: ProfileService) {
@@ -11,9 +12,9 @@ export function createProfileAgent(profileService: ProfileService) {
 		id: 'profile-agent',
 		name: 'Profile Builder Agent',
 		tools: {
-			updateProfile: createUpdateProfileTool(profileService),
-			getProfile: createGetProfileTool(profileService),
-			getIncompleteFields: createGetIncompleteFieldsTool(profileService)
+			updateProfile: withToolLogging(createUpdateProfileTool(profileService)),
+			getProfile: withToolLogging(createGetProfileTool(profileService)),
+			getIncompleteFields: withToolLogging(createGetIncompleteFieldsTool(profileService))
 		}
 	});
 }

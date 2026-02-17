@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/wait.ts
+// src/lib/mastra/tools/browser/wait.ts
 // Browser wait and element-finding tools
 
 import { createTool } from '@mastra/core/tools';

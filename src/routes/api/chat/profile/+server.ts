@@ -5,7 +5,7 @@ import type { RequestHandler } from './$types';
 import { handleChatStream } from '@mastra/ai-sdk';
 import { toAISdkV5Messages } from '@mastra/ai-sdk/ui';
 import { createUIMessageStreamResponse } from 'ai';
-import { mastra } from '../../../../mastra';
+import { mastra } from '$lib/mastra';
 
 const THREAD_ID = 'profile-builder';
 const RESOURCE_ID = 'profile-chat';

@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/extraction.ts
+// src/lib/mastra/tools/browser/extraction.ts
 // Browser data extraction tools — get text, html, value, attribute, count, bounding box, state checks
 
 import { createTool } from '@mastra/core/tools';

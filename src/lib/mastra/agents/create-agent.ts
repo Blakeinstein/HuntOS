@@ -38,9 +38,9 @@ export type CreateAgentOptions = Omit<
 	'instructions' | 'memory' | 'model'
 > & {
 	/**
-	 * The ID of the agent, used to load instructions from `src/mastra/prompts/{id}.md`.
+	 * The ID of the agent, used to load instructions from `src/lib/mastra/prompts/{id}.md`.
 	 * For example, an agent with `id: 'profile-agent'` will load instructions from
-	 * `src/mastra/prompts/profile-agent.md`.
+	 * `src/lib/mastra/prompts/profile-agent.md`.
 	 */
 	id: string;
 	/**
@@ -72,7 +72,7 @@ export type CreateAgentOptions = Omit<
 /**
  * Factory that creates a Mastra Agent.
  *
- * Instructions are loaded from `src/mastra/prompts/{id}.md` via the prompt
+ * Instructions are loaded from `src/lib/mastra/prompts/{id}.md` via the prompt
  * registry so prompts can be edited as plain markdown without touching code.
  *
  * When `dynamicContext` is provided, `instructions` becomes a function that

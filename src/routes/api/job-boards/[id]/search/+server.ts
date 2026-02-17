@@ -2,7 +2,7 @@
 // Job board search API endpoint — invokes the job-board-agent with dynamic URL + profile context
 
 import { json } from '@sveltejs/kit';
-import { services } from '../../../../../mastra';
+import { services } from '$lib/mastra';
 
 export async function POST({ params }) {
 	const jobBoardId = Number(params.id);

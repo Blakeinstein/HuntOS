@@ -6,7 +6,8 @@ import {
 	scrapeResultSchema,
 	type ScrapeResult,
 	type JobBoardRequestContext
-} from '../../../mastra/agents/job-board-agent.types';
+} from '$lib/mastra/agents/job-board-agent.types';
+import { logger } from '$lib/mastra/logger';
 
 export interface ScrapeJobBoardOptions {
 	/** The job board database ID */
@@ -37,11 +38,7 @@ export class JobBoardScraperService {
 	private profileService: ProfileService;
 	private jobBoardService: JobBoardService;
 
-	constructor(
-		mastra: Mastra,
-		profileService: ProfileService,
-		jobBoardService: JobBoardService
-	) {
+	constructor(mastra: Mastra, profileService: ProfileService, jobBoardService: JobBoardService) {
 		this.mastra = mastra;
 		this.profileService = profileService;
 		this.jobBoardService = jobBoardService;
@@ -87,6 +84,11 @@ export class JobBoardScraperService {
 
 		let scrapeResult: ScrapeResult | null = null;
 
+		logger.info(`[job-board-scraper] starting scrape`, {
+			jobBoardId: options.jobBoardId,
+			targetUrl
+		});
+
 		try {
 			const response = await agent.generate(
 				`Scrape the job board at the configured URL and extract all visible job listings. ` +
@@ -101,8 +103,20 @@ export class JobBoardScraperService {
 			);
 
 			scrapeResult = response.object ?? null;
+
+			logger.info(`[job-board-scraper] agent finished`, {
+				jobBoardId: options.jobBoardId,
+				totalSteps: response.steps?.length,
+				totalJobsFound: scrapeResult?.total_found ?? 0,
+				finishReason: response.finishReason,
+				usage: response.usage
+			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
+			logger.error(`[job-board-scraper] agent execution failed`, {
+				jobBoardId: options.jobBoardId,
+				error: message
+			});
 			errors.push(`Agent execution failed: ${message}`);
 			return {
 				success: false,

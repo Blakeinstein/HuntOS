@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/tabs.ts
+// src/lib/mastra/tools/browser/tabs.ts
 // Browser tab management tools — list, new, switch, close, frame switching
 
 import { createTool } from '@mastra/core/tools';

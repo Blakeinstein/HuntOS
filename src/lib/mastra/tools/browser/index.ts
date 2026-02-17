@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/index.ts
+// src/lib/mastra/tools/browser/index.ts
 // Barrel file — re-exports all browser tools as a flat record for agent consumption
 
 import {

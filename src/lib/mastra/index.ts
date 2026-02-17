@@ -1,12 +1,14 @@
-// src/mastra/index.ts
+// src/lib/mastra/index.ts
 // Mastra configuration — creates a Mastra instance with agents wired to app services
 
 import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
+import { Observability, DefaultExporter, SamplingStrategyType } from '@mastra/observability';
 import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import { createProfileAgent } from './agents/profile-agent';
 import { createJobBoardAgent } from './agents/job-board-agent';
+import { logger } from './logger';
 
 const services = createServices(db);
 
@@ -21,6 +23,16 @@ export const mastra = new Mastra({
 	storage: new LibSQLStore({
 		id: 'libsql-storage',
 		url: 'file:./data/memory.db'
+	}),
+	logger,
+	observability: new Observability({
+		configs: {
+			default: {
+				serviceName: 'auto-job-app',
+				sampling: { type: SamplingStrategyType.ALWAYS },
+				exporters: [new DefaultExporter({ logLevel: 'debug' })]
+			}
+		}
 	})
 });
 

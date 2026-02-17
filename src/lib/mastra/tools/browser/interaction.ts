@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/interaction.ts
+// src/lib/mastra/tools/browser/interaction.ts
 // Browser interaction tools — click, fill, type, press, hover, select, check, uncheck
 
 import { createTool } from '@mastra/core/tools';

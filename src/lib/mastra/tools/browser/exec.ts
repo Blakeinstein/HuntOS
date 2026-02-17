@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/exec.ts
+// src/lib/mastra/tools/browser/exec.ts
 // Utility for executing agent-browser CLI commands
 
 import { execFile } from 'node:child_process';

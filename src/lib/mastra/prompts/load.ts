@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * A simple file-based prompt registry that loads markdown prompts
- * from `src/mastra/prompts/` by agent ID.
+ * from `src/lib/mastra/prompts/` by agent ID.
  *
  * Follows the Mastra "prompt registry" pattern so agents can fetch
  * prompts at runtime — including dynamic context injection — without
@@ -136,7 +136,7 @@ class PromptRegistry {
 }
 
 /**
- * Singleton prompt registry instance, reading from `src/mastra/prompts/`.
+ * Singleton prompt registry instance, reading from `src/lib/mastra/prompts/`.
  */
 export const promptRegistry = new PromptRegistry();
 

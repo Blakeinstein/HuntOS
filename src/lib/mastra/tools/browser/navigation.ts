@@ -1,4 +1,4 @@
-// src/mastra/tools/browser/navigation.ts
+// src/lib/mastra/tools/browser/navigation.ts
 // Browser navigation tools — open, back, forward, reload, close, snapshot, screenshot
 
 import { createTool } from '@mastra/core/tools';
