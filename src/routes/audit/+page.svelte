@@ -3,10 +3,19 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
-	import { ScrollTextIcon, ChevronLeftIcon, ChevronRightIcon, InboxIcon } from '@lucide/svelte';
+	import {
+		ScrollTextIcon,
+		ChevronLeftIcon,
+		ChevronRightIcon,
+		InboxIcon,
+		RadioIcon,
+		LoaderCircleIcon
+	} from '@lucide/svelte';
 	import AuditFilters from '$lib/components/AuditFilters.svelte';
 	import AuditLogRow from '$lib/components/AuditLogRow.svelte';
 	import LiveScrapePanel from '$lib/components/LiveScrapePanel.svelte';
+	import { activeScrapes, onScrapeFinish } from '$lib/stores/activeScrapes';
+	import { onDestroy } from 'svelte';
 
 	let { data } = $props();
 
@@ -15,7 +24,6 @@
 	const limit = $derived(data.limit ?? 50);
 	const offset = $derived(data.offset ?? 0);
 	const jobBoards: Array<{ id: number; name: string; base_url: string }> = $derived(
-		// @ts-expect-error — jobBoards is returned by load but not yet in generated $types
 		data.jobBoards ?? []
 	);
 
@@ -34,6 +42,40 @@
 			: null
 	);
 
+	// Derive active scrapes from the global store (includes scrapes started from job boards page)
+	const activeEntries = $derived(
+		Array.from(activeScrapes.entries()).filter(
+			([, s]) => s.state === 'connecting' || s.state === 'streaming'
+		)
+	);
+
+	const hasActiveScrapes = $derived(activeEntries.length > 0);
+
+	// When a scrape started from elsewhere selects a board, auto-select it in the panel
+	$effect(() => {
+		if (hasActiveScrapes && selectedBoardId == null) {
+			const [firstBoardId] = activeEntries[0];
+			selectedBoardId = firstBoardId;
+		}
+	});
+
+	// Listen for scrape finishes globally to auto-refresh the audit log list
+	const unsubFinish = onScrapeFinish(() => {
+		refreshLogs();
+	});
+
+	onDestroy(() => {
+		unsubFinish();
+	});
+
+	function refreshLogs() {
+		invalidate('audit:logs');
+		setTimeout(() => {
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string
+			goto(`${resolve('/audit')}${$page.url.search}`, { invalidateAll: true });
+		}, 500);
+	}
+
 	function goToPage(pageNum: number) {
 		const params = new SvelteURLSearchParams($page.url.searchParams.toString());
 		const newOffset = (pageNum - 1) * limit;
@@ -51,13 +93,7 @@
 	}
 
 	function handleScrapeFinish() {
-		// Refresh the audit logs list to show the new entry
-		invalidate('audit:logs');
-		// Small delay to let the DB write settle
-		setTimeout(() => {
-			// eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string
-			goto(`${resolve('/audit')}${$page.url.search}`, { invalidateAll: true });
-		}, 500);
+		refreshLogs();
 	}
 </script>
 
@@ -73,13 +109,57 @@
 				Execution history for scraping runs, browser actions, and other automated tasks.
 			</p>
 		</div>
-		{#if total > 0}
-			<span class="badge shrink-0 preset-filled-surface-500 text-xs">
-				{total.toLocaleString()}
-				{total === 1 ? 'entry' : 'entries'}
-			</span>
-		{/if}
+		<div class="flex items-center gap-2">
+			{#if hasActiveScrapes}
+				<span class="badge flex items-center gap-1.5 preset-filled-primary-500 text-xs">
+					<LoaderCircleIcon class="size-3 animate-spin" />
+					{activeEntries.length} active
+				</span>
+			{/if}
+			{#if total > 0}
+				<span class="badge shrink-0 preset-filled-surface-500 text-xs">
+					{total.toLocaleString()}
+					{total === 1 ? 'entry' : 'entries'}
+				</span>
+			{/if}
+		</div>
 	</div>
+
+	<!-- Active scrape banner: shows when scrapes are running (started from any page) -->
+	{#if hasActiveScrapes}
+		<div class="space-y-2">
+			{#each activeEntries as [boardId, scrape] (boardId)}
+				{@const board = jobBoards.find((b) => b.id === boardId)}
+				<div
+					class="flex items-center gap-3 rounded-lg border border-primary-500/30 bg-primary-500/5 px-4 py-2.5"
+				>
+					<LoaderCircleIcon class="size-4 shrink-0 animate-spin text-primary-500" />
+					<div class="min-w-0 flex-1">
+						<p class="text-xs font-medium">
+							Scraping {scrape.boardName}{board ? ` — ${board.base_url}` : ''}
+						</p>
+						{#if scrape.events.length > 0}
+							{@const latest = scrape.events.filter((e) => e.type !== 'text-delta').at(-1)}
+							{#if latest}
+								<p class="mt-0.5 truncate text-[11px] opacity-50">{latest.message}</p>
+							{/if}
+						{/if}
+					</div>
+					<span class="shrink-0 text-[10px] tabular-nums opacity-40">
+						{scrape.events.length} events
+					</span>
+					<button
+						type="button"
+						class="btn gap-1 preset-tonal-primary btn-sm text-[10px]"
+						onclick={() => (selectedBoardId = boardId)}
+					>
+						<RadioIcon class="size-3" />
+						View Stream
+					</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
 
 	<!-- Live Scrape Panel -->
 	{#if jobBoards.length > 0}
@@ -101,7 +181,10 @@
 					>
 						<option value="">Select a board to stream…</option>
 						{#each jobBoards as board (board.id)}
-							<option value={board.id}>{board.name} — {board.base_url}</option>
+							{@const isActive = activeEntries.some(([id]) => id === board.id)}
+							<option value={board.id}>
+								{board.name} — {board.base_url}{isActive ? ' (streaming)' : ''}
+							</option>
 						{/each}
 					</select>
 				</div>

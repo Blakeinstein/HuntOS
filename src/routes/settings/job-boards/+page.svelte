@@ -304,7 +304,7 @@
 						</div>
 
 						<!-- Scrape button — full width below the main row -->
-						<ScrapeButton boardId={board.id} disabled={!board.is_enabled} />
+						<ScrapeButton boardId={board.id} boardName={board.name} disabled={!board.is_enabled} />
 					</div>
 				{/each}
 			</div>

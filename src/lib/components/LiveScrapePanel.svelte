@@ -22,8 +22,13 @@
 		ScrapeErrorPayload,
 		StepFinishPayload
 	} from '$lib/services/services/agentStream.types';
-
-	type StreamState = 'idle' | 'connecting' | 'streaming' | 'done' | 'error';
+	import {
+		activeScrapes,
+		dismissScrape,
+		isScrapeActive,
+		type ScrapeStreamState
+	} from '$lib/stores/activeScrapes';
+	import { startScrapeStream, type ScrapeStreamController } from '$lib/services/scrapeStream';
 
 	interface Props {
 		/** Job board database ID to scrape. */
@@ -36,13 +41,16 @@
 
 	let { boardId, boardName = 'Job Board', onfinish }: Props = $props();
 
-	let streamState: StreamState = $state('idle');
-	let events: AgentStepEvent[] = $state([]);
-	let finishPayload: ScrapeFinishPayload | null = $state(null);
-	let errorPayload: ScrapeErrorPayload | null = $state(null);
+	// Reactive binding to the global active scrape for this board
+	const scrape = $derived(activeScrapes.get(boardId) ?? null);
+	const streamState: ScrapeStreamState | 'idle' = $derived(scrape?.state ?? 'idle');
+	const events: AgentStepEvent[] = $derived(scrape?.events ?? []);
+	const finishPayload = $derived(scrape?.finishPayload ?? null);
+	const errorPayload = $derived(scrape?.errorPayload ?? null);
+
 	let expandedEvents = new SvelteSet<number>();
 	let autoScroll = $state(true);
-	let abortController: AbortController | null = null;
+	let controller: ScrapeStreamController | null = null;
 
 	let scrollContainer: HTMLDivElement | undefined = $state(undefined);
 
@@ -90,135 +98,43 @@
 	}
 
 	async function startStream() {
-		if (streamState === 'streaming' || streamState === 'connecting') return;
+		if (isScrapeActive(boardId)) return;
 
-		streamState = 'connecting';
-		events = [];
-		finishPayload = null;
-		errorPayload = null;
 		expandedEvents.clear();
 		autoScroll = true;
 
-		abortController = new AbortController();
-
-		try {
-			const response = await fetch(`/api/job-boards/${boardId}/scrape-stream`, {
-				method: 'POST',
-				signal: abortController.signal
-			});
-
-			if (!response.ok) {
-				const body = await response.text();
-				let errorMsg: string;
-				try {
-					errorMsg = JSON.parse(body).error ?? body;
-				} catch {
-					errorMsg = body;
-				}
-				streamState = 'error';
-				events = [
-					...events,
-					{
-						type: 'scrape-error',
-						timestamp: Date.now(),
-						message: `HTTP ${response.status}: ${errorMsg}`
-					}
-				];
-				return;
+		controller = startScrapeStream({
+			boardId,
+			boardName,
+			onEvent: () => {
+				scrollToBottom();
+			},
+			onFinish: (payload: ScrapeFinishPayload) => {
+				onfinish?.({
+					success: payload.success,
+					totalFound: payload.totalFound,
+					newApplications: payload.newApplications
+				});
+			},
+			onError: () => {
+				onfinish?.({
+					success: false,
+					totalFound: 0,
+					newApplications: 0
+				});
 			}
-
-			streamState = 'streaming';
-
-			const reader = response.body?.getReader();
-			if (!reader) {
-				streamState = 'error';
-				return;
-			}
-
-			const decoder = new TextDecoder();
-			let buffer = '';
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-
-				// Parse SSE lines
-				const lines = buffer.split('\n');
-				// Keep the last incomplete line in the buffer
-				buffer = lines.pop() ?? '';
-
-				for (const line of lines) {
-					if (!line.startsWith('data: ')) continue;
-					const json = line.slice(6).trim();
-					if (!json) continue;
-
-					try {
-						const event: AgentStepEvent = JSON.parse(json);
-						events = [...events, event];
-
-						if (event.type === 'scrape-finish') {
-							finishPayload = event.data as ScrapeFinishPayload;
-							streamState = 'done';
-							onfinish?.({
-								success: finishPayload.success,
-								totalFound: finishPayload.totalFound,
-								newApplications: finishPayload.newApplications
-							});
-						} else if (event.type === 'scrape-error') {
-							errorPayload = event.data as ScrapeErrorPayload;
-							streamState = 'error';
-							onfinish?.({
-								success: false,
-								totalFound: 0,
-								newApplications: 0
-							});
-						}
-
-						scrollToBottom();
-					} catch {
-						// Ignore malformed JSON
-					}
-				}
-			}
-
-			// If we finished reading but never got a terminal event
-			if (streamState === 'streaming') {
-				streamState = 'done';
-			}
-		} catch (err) {
-			if (abortController?.signal.aborted) {
-				streamState = 'idle';
-				return;
-			}
-			streamState = 'error';
-			const message = err instanceof Error ? err.message : String(err);
-			events = [
-				...events,
-				{
-					type: 'scrape-error',
-					timestamp: Date.now(),
-					message: `Connection error: ${message}`
-				}
-			];
-		}
+		});
 	}
 
 	function stopStream() {
-		abortController?.abort();
-		abortController = null;
-		if (streamState === 'streaming' || streamState === 'connecting') {
-			streamState = 'idle';
-		}
+		controller?.abort();
+		controller = null;
 	}
 
 	function dismiss() {
 		stopStream();
-		streamState = 'idle';
-		events = [];
-		finishPayload = null;
-		errorPayload = null;
+		dismissScrape(boardId);
+		expandedEvents.clear();
 	}
 
 	function eventIcon(type: string) {
@@ -287,19 +203,22 @@
 </script>
 
 <div class="flex flex-col gap-3">
-	<!-- Header row -->
+	<!-- Header with controls -->
 	<div class="flex items-center justify-between">
-		<span class="text-[10px] font-medium tracking-wide uppercase opacity-40">Live Scrape</span>
+		<span class="text-[10px] font-medium tracking-wide uppercase opacity-40">
+			Live Stream — {boardName}
+		</span>
 		<div class="flex items-center gap-2">
 			{#if streamState === 'streaming' || streamState === 'connecting'}
 				<span class="flex items-center gap-1 text-xs text-primary-500">
 					<LoaderCircleIcon class="size-3 animate-spin" />
-					{streamState === 'connecting' ? 'Connecting…' : 'Streaming'}
+					{streamState === 'connecting' ? 'Connecting…' : 'Streaming…'}
 				</span>
 				<button
 					type="button"
 					class="btn gap-1 preset-tonal-error btn-sm text-[10px]"
 					onclick={stopStream}
+					title="Stop stream"
 				>
 					<XIcon class="size-3" />
 					Stop
@@ -315,67 +234,68 @@
 					onclick={startStream}
 				>
 					<RadioIcon class="size-3" />
-					Run Again
+					Retry
 				</button>
 			{:else}
 				<button type="button" class="btn gap-1.5 preset-tonal-primary btn-sm" onclick={startStream}>
 					<RadioIcon class="size-3.5" />
-					<span>Stream Scrape</span>
+					<span>Start Stream</span>
 				</button>
 			{/if}
 		</div>
 	</div>
 
-	<!-- Events panel -->
+	<!-- Event feed -->
 	{#if events.length > 0 || streamState === 'connecting'}
 		<div class="overflow-hidden rounded-lg border border-surface-200-800 bg-surface-50-950">
 			<!-- Stats bar -->
 			<div
-				class="flex items-center gap-4 border-b border-surface-200-800 bg-surface-100-900/50 px-3 py-1.5"
+				class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-surface-200-800 px-3 py-1.5"
 			>
 				<span class="text-[10px] opacity-50">
-					{boardName}
+					{events.length} event{events.length === 1 ? '' : 's'}
 				</span>
 				<span class="text-[10px] opacity-40">
-					{events.length} events
+					{events.filter((e) => e.type !== 'text-delta').length} steps
 				</span>
 				{#if stepCount > 0}
 					<span class="text-[10px] opacity-40">
-						{stepCount} steps
+						{stepCount} agent step{stepCount === 1 ? '' : 's'}
 					</span>
 				{/if}
 				{#if toolCallCount > 0}
 					<span class="text-[10px] opacity-40">
-						{toolCallCount} tool calls
+						{toolCallCount} tool call{toolCallCount === 1 ? '' : 's'}
 					</span>
 				{/if}
 				{#if elapsedMs > 0}
 					<span class="text-[10px] opacity-40">
-						{formattedElapsed}
+						{formattedElapsed} elapsed
 					</span>
 				{/if}
 				<span class="flex-1"></span>
 				{#if !autoScroll}
 					<button
 						type="button"
-						class="flex items-center gap-1 text-[10px] text-primary-500 hover:underline"
+						class="btn gap-1 preset-tonal btn-sm text-[10px]"
 						onclick={() => {
 							autoScroll = true;
 							scrollToBottom();
 						}}
+						title="Scroll to bottom"
 					>
 						<ArrowDownIcon class="size-3" />
-						Auto-scroll
+						Follow
 					</button>
 				{/if}
 			</div>
 
-			<!-- Event list -->
+			<!-- Scrollable event list -->
 			<div class="max-h-96 overflow-y-auto" bind:this={scrollContainer} onscroll={handleScroll}>
 				{#if streamState === 'connecting' && events.length === 0}
 					<div class="flex items-center justify-center gap-2 px-4 py-8 opacity-50">
 						<LoaderCircleIcon class="size-4 animate-spin" />
-						<span class="text-xs">Connecting to agent…</span>
+						<span class="text-xs">Connecting to stream…</span>
 					</div>
 				{/if}
 
@@ -385,18 +305,21 @@
 					{@const expandable = hasExpandableData(event)}
 					{@const isExpanded = expandedEvents.has(i)}
 
-					<!-- Skip text-delta events in the list for cleaner view -->
+					<!-- Skip text-delta events in the list view -->
 					{#if event.type !== 'text-delta'}
 						<div class="border-b border-surface-200-800/50 last:border-b-0">
+							<!-- Event row (clickable if expandable) -->
 							<button
 								type="button"
-								class="flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-100-900/30"
+								class="flex w-full items-start gap-2 px-3 py-1.5 text-left transition-colors {expandable
+									? 'cursor-pointer hover:bg-surface-200-800/20'
+									: 'cursor-default'}"
+								disabled={!expandable}
 								onclick={() => {
 									if (expandable) toggleEvent(i);
 								}}
-								disabled={!expandable}
 							>
-								<!-- Expand indicator -->
+								<!-- Expand chevron -->
 								<span class="flex w-3 shrink-0 items-center pt-0.5">
 									{#if expandable}
 										{#if isExpanded}
@@ -421,10 +344,10 @@
 								</span>
 							</button>
 
-							<!-- Expanded details -->
+							<!-- Expanded detail panel -->
 							{#if isExpanded && event.data}
 								<div
-									class="border-t border-surface-200-800/30 bg-surface-100-900/20 px-3 py-2 pl-11"
+									class="mr-3 mb-2 ml-13 space-y-2 rounded border border-surface-200-800/50 bg-surface-100-900 p-2.5"
 								>
 									{#if event.data.kind === 'tool-call'}
 										{@const d = event.data as ToolCallPayload}
@@ -434,7 +357,7 @@
 													>Arguments</span
 												>
 												<pre
-													class="max-h-40 overflow-auto rounded bg-surface-200-800/30 p-2 font-mono text-[11px] opacity-70">{JSON.stringify(
+													class="overflow-x-auto text-[11px] wrap-break-word whitespace-pre-wrap opacity-70">{JSON.stringify(
 														d.args,
 														null,
 														2
@@ -448,11 +371,11 @@
 												>Result</span
 											>
 											<pre
-												class="max-h-40 overflow-auto rounded bg-surface-200-800/30 p-2 font-mono text-[11px] wrap-break-word whitespace-pre-wrap opacity-70">{d.result ??
+												class="overflow-x-auto text-[11px] wrap-break-word whitespace-pre-wrap opacity-70">{d.result ??
 													'(empty)'}</pre>
 											{#if d.isError}
 												<span class="text-[10px] font-medium text-error-500"
-													>⚠ Tool returned an error result</span
+													>Tool reported an error</span
 												>
 											{/if}
 										</div>
@@ -463,45 +386,57 @@
 												>Error</span
 											>
 											<pre
-												class="max-h-40 overflow-auto rounded bg-error-500/5 p-2 font-mono text-[11px] text-error-500">{d.error}</pre>
+												class="overflow-x-auto text-[11px] wrap-break-word whitespace-pre-wrap text-error-500">{d.error}</pre>
 										</div>
 									{:else if event.data.kind === 'step-finish'}
 										{@const d = event.data as StepFinishPayload}
 										<div class="flex flex-wrap gap-3 text-[10px] opacity-60">
 											{#if d.finishReason}
-												<span>Reason: <strong>{d.finishReason}</strong></span>
+												<span>
+													<strong>Reason:</strong>
+													{d.finishReason}
+												</span>
 											{/if}
 											{#if d.toolCallCount != null}
-												<span>Tool calls: <strong>{d.toolCallCount}</strong></span>
+												<span>
+													<strong>Tool calls:</strong>
+													{d.toolCallCount}
+												</span>
 											{/if}
 											{#if d.usage}
-												<span>Tokens: <strong>{d.usage.totalTokens ?? '?'}</strong></span>
+												<span>
+													<strong>Tokens:</strong>
+													{d.usage.totalTokens ?? '?'}
+												</span>
 											{/if}
 										</div>
 									{:else if event.data.kind === 'scrape-finish'}
 										{@const d = event.data as ScrapeFinishPayload}
 										<div class="space-y-1.5">
 											<div class="flex flex-wrap gap-3 text-[10px]">
-												<span class="opacity-60">Found: <strong>{d.totalFound}</strong></span>
+												<span class="opacity-60">
+													<strong>Total found:</strong>
+													{d.totalFound}
+												</span>
 												<span class="opacity-60"
-													>New: <strong class="text-success-500">{d.newApplications}</strong></span
+													><strong class="text-success-500">New:</strong>
+													{d.newApplications}</span
 												>
 												<span class="opacity-60"
-													>Duplicates: <strong>{d.duplicatesSkipped}</strong></span
+													><strong>Duplicates:</strong>
+													{d.duplicatesSkipped}</span
 												>
 												<span class="opacity-60"
-													>Duration: <strong
-														>{d.durationMs < 1000
-															? `${d.durationMs}ms`
-															: `${(d.durationMs / 1000).toFixed(1)}s`}</strong
-													></span
+													><strong class={d.success ? 'text-success-500' : 'text-warning-500'}
+														>Status:</strong
+													>
+													{d.success ? 'Success' : d.blocked ? 'Blocked' : 'Issues'}</span
 												>
 											</div>
 											{#if d.errors.length > 0}
 												<div>
-													<span
-														class="text-[10px] font-semibold tracking-wide text-error-500 uppercase"
-														>Errors</span
+													<span class="text-[10px] font-semibold tracking-wide uppercase opacity-40"
+														>Errors ({d.errors.length})</span
 													>
 													{#each d.errors as err (err)}
 														<p class="text-[11px] text-error-500">{err}</p>
@@ -513,11 +448,11 @@
 										{@const d = event.data as ScrapeErrorPayload}
 										<div class="space-y-1">
 											<pre
-												class="rounded bg-error-500/5 p-2 font-mono text-[11px] wrap-break-word whitespace-pre-wrap text-error-500">{d.error}</pre>
+												class="overflow-x-auto text-[11px] wrap-break-word whitespace-pre-wrap text-error-500">{d.error}</pre>
 											<span class="text-[10px] opacity-40"
-												>After {d.durationMs < 1000
-													? `${d.durationMs}ms`
-													: `${(d.durationMs / 1000).toFixed(1)}s`}</span
+												>Duration: {d.durationMs
+													? `${(d.durationMs / 1000).toFixed(1)}s`
+													: 'unknown'}</span
 											>
 										</div>
 									{/if}
@@ -527,33 +462,34 @@
 					{/if}
 				{/each}
 
-				<!-- Streaming indicator at bottom -->
+				<!-- Streaming indicator at the bottom -->
 				{#if streamState === 'streaming'}
 					<div class="flex items-center gap-2 px-3 py-2 opacity-40">
 						<LoaderCircleIcon class="size-3 animate-spin" />
-						<span class="text-[10px]">Waiting for next event…</span>
+						<span class="text-[10px]">Receiving events…</span>
 					</div>
 				{/if}
 			</div>
 
-			<!-- Terminal status bar -->
+			<!-- Terminal summary bar -->
 			{#if streamState === 'done' && finishPayload}
 				<div
-					class="flex items-center gap-2 border-t px-3 py-2 {finishPayload.success
+					class="flex items-center gap-2 border-t px-3 py-2 {finishPayload.success &&
+					!finishPayload.blocked
 						? 'border-success-500/20 bg-success-500/5'
 						: finishPayload.blocked
 							? 'border-warning-500/20 bg-warning-500/5'
-							: 'border-warning-500/20 bg-warning-500/5'}"
+							: 'border-error-500/20 bg-error-500/5'}"
 				>
 					{#if finishPayload.success}
 						<CheckCircleIcon class="size-3.5 text-success-500" />
 						<span class="text-xs font-medium text-success-600 dark:text-success-400">
-							{finishPayload.totalFound} jobs found — {finishPayload.newApplications} new added
+							Done — {finishPayload.totalFound} jobs found, {finishPayload.newApplications} new
 						</span>
 					{:else if finishPayload.blocked}
 						<AlertTriangleIcon class="size-3.5 text-warning-500" />
 						<span class="text-xs font-medium text-warning-600 dark:text-warning-400">
-							Blocked — login required in remote Chrome
+							Blocked — log in via the remote Chrome session and retry
 						</span>
 					{:else}
 						<AlertTriangleIcon class="size-3.5 text-warning-500" />
