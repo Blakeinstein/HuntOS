@@ -121,6 +121,12 @@ export interface ScrapeFinishPayload {
 	duplicatesSkipped: number;
 	errors: string[];
 	blocked: boolean;
+	/** The 1-based page number the agent finished scraping. */
+	currentPage?: number;
+	/** The full URL of the last page scraped (with pagination query params). */
+	currentPageUrl?: string;
+	/** Whether additional pages of results exist beyond the last page scraped. */
+	hasMorePages?: boolean;
 	/** Total duration of the scrape in milliseconds. */
 	durationMs: number;
 }

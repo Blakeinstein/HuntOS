@@ -16,18 +16,40 @@ export const paginationContextSchema = z.object({
 export type PaginationContext = z.infer<typeof paginationContextSchema>;
 
 /**
+ * The work arrangement / job type for a scraped listing.
+ */
+export const jobTypeEnum = z
+	.enum(['remote', 'hybrid', 'on-site', 'unknown'])
+	.describe('The work arrangement: remote, hybrid, on-site, or unknown if not specified');
+
+export type JobType = z.infer<typeof jobTypeEnum>;
+
+/**
  * Schema for an individual scraped job posting returned by the agent.
+ *
+ * The agent's sole responsibility is to extract factual listing details.
+ * No application-related data (form fields, relevance scores, etc.) is included.
  */
 export const scrapedJobSchema = z.object({
 	title: z.string().describe('The job title'),
 	company: z.string().describe('The company name'),
-	location: z.string().nullable().optional().describe('The job location if available'),
+	location: z
+		.string()
+		.nullable()
+		.optional()
+		.describe('The job location if available (city, state, country)'),
 	url: z.string().url().describe('The absolute URL for the individual job posting'),
+	job_type: jobTypeEnum.describe('Work arrangement: remote, hybrid, on-site, or unknown'),
 	salary_range: z.string().nullable().optional().describe('The salary range if displayed'),
-	posted_at: z.string().nullable().optional().describe('When the job was posted'),
-	relevance: z
-		.enum(['high', 'medium', 'low'])
-		.describe('Relevance score based on user profile match')
+	description: z
+		.string()
+		.nullable()
+		.optional()
+		.describe(
+			'A summary of the job description including responsibilities. ' +
+				'Extract what is visible on the listing page — do NOT navigate into the job detail page.'
+		),
+	posted_at: z.string().nullable().optional().describe('When the job was posted')
 });
 
 export type ScrapedJob = z.infer<typeof scrapedJobSchema>;
@@ -39,7 +61,12 @@ export const scrapeResultSchema = z.object({
 	success: z.boolean().describe('Whether the scraping operation succeeded'),
 	source_url: z.string().describe('The URL that was scraped'),
 	scraped_at: z.string().describe('ISO 8601 timestamp of when the scrape occurred'),
-	total_found: z.number().describe('Total number of job listings found'),
+	total_found: z
+		.number()
+		.describe(
+			'The number of job listings included in the `jobs` array of this response. ' +
+				'This MUST equal `jobs.length`.'
+		),
 	jobs: z.array(scrapedJobSchema).describe('Array of extracted job postings'),
 	errors: z.array(z.string()).describe('Any errors encountered during scraping'),
 	blocked: z.boolean().describe('Whether the page required authentication or was blocked'),
@@ -48,13 +75,27 @@ export const scrapeResultSchema = z.object({
 		.number()
 		.int()
 		.positive()
-		.optional()
-		.describe('The 1-based page number the agent finished scraping'),
+		.describe(
+			'REQUIRED — The 1-based page number the agent finished scraping. ' +
+				'For single-page boards (e.g. Greenhouse), this is 1. ' +
+				'For paginated boards, this is the last page number the agent visited.'
+		),
 	/** The full URL of the page the agent stopped on, for resuming next time. */
 	current_page_url: z
 		.string()
-		.optional()
-		.describe('The URL of the last page scraped, including pagination query params')
+		.describe(
+			'REQUIRED — The full URL of the last page scraped, including any pagination query params. ' +
+				'The system uses this to resume from the correct position on the next scrape session.'
+		),
+	/** Whether there are more pages of results beyond the last page the agent scraped. */
+	has_more_pages: z
+		.boolean()
+		.describe(
+			'REQUIRED — Whether there are additional pages of results beyond the last page scraped. ' +
+				'Set to `true` if the agent stopped because it reached `max_listings` but there were ' +
+				'more results available (e.g. a "Next" button or more scroll content existed). ' +
+				'Set to `false` if the agent reached the end of all available results.'
+		)
 });
 
 export type ScrapeResult = z.infer<typeof scrapeResultSchema>;
@@ -66,7 +107,7 @@ export type ScrapeResult = z.infer<typeof scrapeResultSchema>;
 export type JobBoardRequestContext = {
 	/** The job board search results URL to navigate to and scrape */
 	'job-board-url': string;
-	/** JSON-serialized user profile data for relevance matching */
+	/** JSON-serialized user profile data for context (job preferences, target roles) */
 	'user-profile': string;
 	/** JSON-serialized pagination context for resume/max-listings behaviour */
 	'pagination-context': string;

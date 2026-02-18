@@ -48,7 +48,9 @@ export interface JobPosting {
 	title: string;
 	company: string;
 	location?: string | null;
+	job_type?: 'remote' | 'hybrid' | 'on-site' | 'unknown' | null;
 	salary_range?: string | null;
+	description?: string | null;
 	job_description_url: string;
 	job_description?: string;
 	posted_at: string;
@@ -247,17 +249,24 @@ export class JobBoardService {
 	}
 
 	/**
-	 * Add job posting as application
+	 * Add a scraped job posting as an application in the Backlog swimlane.
+	 *
+	 * This only persists the listing details gathered during scraping.
+	 * No form fields are generated — form fields are only relevant when
+	 * actually applying for a job, which is a separate concern.
+	 *
+	 * @returns `{ id, isNew }` — `isNew` is `true` when a new row was inserted,
+	 *          `false` when the URL already existed (duplicate).
 	 */
-	async addApplicationFromJob(job: JobPosting): Promise<number> {
-		// Check if already exists
-		const existing = await this.db.get(
+	async addApplicationFromJob(job: JobPosting): Promise<{ id: number; isNew: boolean }> {
+		// Check if already exists (deduplicate by URL)
+		const existing = await this.db.get<{ id: number }>(
 			`SELECT id FROM applications WHERE job_description_url = ?`,
 			[job.job_description_url]
 		);
 
 		if (existing) {
-			return existing.id;
+			return { id: existing.id, isNew: false };
 		}
 
 		// Get backlog swimlane
@@ -267,36 +276,26 @@ export class JobBoardService {
 			throw new Error('Default "Backlog" swimlane not found');
 		}
 
-		// Create application
+		// Build a structured job description from scraped details
+		const descriptionParts: string[] = [];
+		if (job.location) descriptionParts.push(`Location: ${job.location}`);
+		if (job.job_type && job.job_type !== 'unknown') descriptionParts.push(`Type: ${job.job_type}`);
+		if (job.salary_range) descriptionParts.push(`Salary: ${job.salary_range}`);
+		if (job.description) descriptionParts.push(`\n${job.description}`);
+
+		const fullDescription =
+			descriptionParts.length > 0 ? descriptionParts.join('\n') : job.job_description || null;
+
+		// Create application — store all listing details directly on the record
 		const result = await this.db.run(
 			`
       INSERT INTO applications (title, company, job_description_url, job_description, status_swimlane_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       `,
-			[job.title, job.company, job.job_description_url, job.job_description || null, backlog.id]
+			[job.title, job.company, job.job_description_url, fullDescription, backlog.id]
 		);
-		const appId = Number(result.lastInsertRowid);
 
-		// Create application fields from job data
-		const fields = [
-			{ name: 'job_title', value: job.title },
-			{ name: 'company', value: job.company },
-			{ name: 'location', value: job.location || '' },
-			{ name: 'salary_range', value: job.salary_range || '' }
-		];
-
-		for (const field of fields) {
-			await this.db.run(
-				`
-        INSERT INTO application_fields (application_id, field_name, field_value, is_required, status, created_at, updated_at)
-        VALUES (?, ?, ?, 0, 'filled', datetime('now'), datetime('now'))
-        ON CONFLICT(application_id, field_name) DO UPDATE SET field_value = excluded.field_value
-        `,
-				[appId, field.name, field.value]
-			);
-		}
-
-		return appId;
+		return { id: Number(result.lastInsertRowid), isNew: true };
 	}
 
 	/**

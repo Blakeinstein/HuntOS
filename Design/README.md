@@ -35,11 +35,14 @@ This section provides a high-level overview of what has been implemented versus 
     -   **[⚠️] Notes:** The UI is basic. The core feature of conversing with an LLM to build the profile is not yet implemented.
 
 -   **Job Board Scraping:**
-    -   **[✅] Data Model:** A table for job boards is defined.
-    -   **[❌] Notes:** This is one of the least implemented features. The service (`jobBoard.ts`) and UI exist as placeholders. The actual scraping logic using `agent-browser` has not been built. The scheduling mechanism is also not implemented.
+    -   **[✅] Data Model:** A table for job boards is defined with pagination bookmark columns.
+    -   **[✅] Scraping Agents:** Site-specific agents (LinkedIn, Greenhouse) and a generic fallback agent are implemented with browser automation tools. Agents are strictly limited to **scraping job listings only** — they do not attempt to apply for jobs or interact with application forms.
+    -   **[✅] Scraped Job Schema:** Each listing extracts: title, company, location, job type (remote/hybrid/on-site/unknown), salary range, description/responsibilities, and posted date. No form fields (`application_fields`) are generated during scraping — listing details are stored directly on the application record.
+    -   **[✅] Streaming:** Real-time SSE streaming of scrape progress via `ScrapeRunManager`.
+    -   **[⚠️] Notes:** The scheduling mechanism (cron-based auto-scraping) is not yet implemented. Scrapes are triggered manually via the API/UI. Authentication with job boards (e.g. LinkedIn session cookies) requires manual setup in the remote Chrome instance.
 
--   **Browser Automation:**
-    -   **[❌] Notes:** The `browserAgent.ts` service is a placeholder. No integration with `agent-browser` or Mastra has been done. This is a core component that requires significant implementation work.
+-   **Browser Automation (Application Filling):**
+    -   **[❌] Notes:** The `browserAgent.ts` service is a placeholder. No integration with `agent-browser` or Mastra has been done for the application-filling workflow. This is separate from the job scraping agents, which are implemented. Form field generation is only relevant here (not during scraping).
 
 -   **Email Automation:**
     -   **[✅] Basic UI:** A settings page to connect email accounts exists.

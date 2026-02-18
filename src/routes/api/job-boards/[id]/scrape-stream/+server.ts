@@ -134,7 +134,10 @@ export const POST: RequestHandler = async ({ params }) => {
 	};
 
 	const targetUrl = paginationState.resumePageUrl ?? jobBoard.base_url;
-	const entry = subAgentRegistry.resolve(targetUrl);
+
+	// Always resolve the sub-agent against the *base* URL so that pagination
+	// query params (e.g. &start=50) don't accidentally cause a routing mismatch.
+	const entry = subAgentRegistry.resolve(jobBoard.base_url);
 	const agentId = entry?.agentId ?? 'job-board-agent.generic';
 	const detectedBoard = entry?.board ?? 'generic';
 
@@ -355,7 +358,10 @@ async function executeScrape(params: ScrapeParams): Promise<void> {
 
 		const result = await agent.stream(
 			`Scrape the job board at the configured URL and extract all visible job listings. ` +
-				`Evaluate each listing against the user profile for relevance. ` +
+				`For each listing, extract the job title, company name, location, job type (remote/hybrid/on-site), ` +
+				`salary range, and any visible description or responsibilities. ` +
+				`Do NOT attempt to apply for any jobs or interact with application forms. ` +
+				`You MUST include current_page, current_page_url, and has_more_pages in your JSON response. ` +
 				`Return your final answer as a single JSON object (no surrounding text).`,
 			{
 				requestContext,
@@ -570,21 +576,26 @@ async function executeScrape(params: ScrapeParams): Promise<void> {
 
 		for (const job of scrapeResult.jobs) {
 			try {
-				const appId = await jobBoardService.addApplicationFromJob({
+				const { isNew } = await jobBoardService.addApplicationFromJob({
 					job_board_id: jobBoardId,
 					title: job.title,
 					company: job.company,
 					location: job.location,
+					job_type: job.job_type ?? 'unknown',
 					salary_range: job.salary_range,
+					description: job.description,
 					job_description_url: job.url,
 					posted_at: job.posted_at ?? new Date().toISOString(),
 					created_at: new Date().toISOString()
 				});
-				if (appId > 0) newApplications++;
+				if (isNew) {
+					newApplications++;
+				} else {
+					duplicatesSkipped++;
+				}
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				errors.push(`Failed to persist "${job.title}": ${msg}`);
-				duplicatesSkipped++;
 			}
 		}
 
@@ -596,21 +607,9 @@ async function executeScrape(params: ScrapeParams): Promise<void> {
 			errors.push(`Failed to update lastRunAt: ${msg}`);
 		}
 
-		// Update pagination bookmark
+		// Update pagination bookmark for next session
 		try {
-			if (scrapeResult.current_page && scrapeResult.current_page_url) {
-				await jobBoardService.updatePaginationState(
-					jobBoardId,
-					scrapeResult.current_page,
-					scrapeResult.current_page_url
-				);
-			} else if (scrapeResult.current_page) {
-				await jobBoardService.updatePaginationState(
-					jobBoardId,
-					scrapeResult.current_page,
-					targetUrl
-				);
-			}
+			await advancePagination(jobBoardId, scrapeResult);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			errors.push(`Failed to update pagination state: ${msg}`);
@@ -630,6 +629,9 @@ async function executeScrape(params: ScrapeParams): Promise<void> {
 				totalFound: scrapeResult.total_found,
 				newApplications,
 				duplicatesSkipped,
+				currentPage: scrapeResult.current_page,
+				currentPageUrl: scrapeResult.current_page_url,
+				hasMorePages: scrapeResult.has_more_pages,
 				errors: errors.length > 0 ? errors : undefined
 			}
 		});
@@ -648,6 +650,9 @@ async function executeScrape(params: ScrapeParams): Promise<void> {
 					duplicatesSkipped,
 					errors,
 					blocked: false,
+					currentPage: scrapeResult.current_page,
+					currentPageUrl: scrapeResult.current_page_url,
+					hasMorePages: scrapeResult.has_more_pages,
 					durationMs
 				} satisfies ScrapeFinishPayload
 			)
@@ -672,5 +677,102 @@ async function executeScrape(params: ScrapeParams): Promise<void> {
 				durationMs: Date.now() - startTime
 			} satisfies ScrapeErrorPayload)
 		);
+	}
+}
+
+// ── Pagination advancement helper ───────────────────────────────────
+
+/**
+ * Advances (or resets) the pagination bookmark based on the agent's report.
+ *
+ * - `has_more_pages === true` → Save `current_page + 1` so the next session
+ *   starts on the page *after* the one already scraped.
+ * - `has_more_pages === false` → Clear the bookmark so the next session
+ *   starts from the beginning (the board has been fully traversed).
+ * - If the agent omitted pagination fields, leave the bookmark untouched.
+ */
+async function advancePagination(jobBoardId: number, result: ScrapeResult): Promise<void> {
+	const { current_page, current_page_url, has_more_pages } = result;
+	const jobBoardService = services.jobBoardService;
+
+	if (current_page == null || current_page_url == null) {
+		logger.warn('[scrape-stream] agent omitted pagination fields — bookmark unchanged', {
+			jobBoardId,
+			current_page,
+			current_page_url,
+			has_more_pages
+		});
+		return;
+	}
+
+	if (has_more_pages) {
+		const nextPage = current_page + 1;
+		const nextPageUrl = buildNextPageUrl(current_page_url, nextPage) ?? current_page_url;
+
+		logger.info('[scrape-stream] advancing pagination bookmark', {
+			jobBoardId,
+			scrapedPage: current_page,
+			nextPage,
+			nextPageUrl
+		});
+
+		await jobBoardService.updatePaginationState(jobBoardId, nextPage, nextPageUrl);
+	} else {
+		logger.info('[scrape-stream] resetting pagination — no more pages', {
+			jobBoardId,
+			scrapedPage: current_page
+		});
+
+		await jobBoardService.resetPaginationState(jobBoardId);
+	}
+}
+
+/**
+ * Attempts to compute the URL for the next page by detecting and incrementing
+ * common pagination query parameters in the current page URL.
+ *
+ * Supports: `start` (LinkedIn offset), `page`, `p`, `offset`.
+ * Returns `null` if no known parameter was detected.
+ */
+function buildNextPageUrl(currentUrl: string, nextPage: number): string | null {
+	try {
+		const url = new URL(currentUrl);
+		const params = url.searchParams;
+
+		// LinkedIn: `start` is an offset (items-per-page * (page - 1))
+		if (params.has('start')) {
+			const currentStart = Number(params.get('start'));
+			if (!Number.isNaN(currentStart)) {
+				const currentPage = nextPage - 1;
+				const pageSize = currentPage > 1 ? Math.round(currentStart / (currentPage - 1)) : 25;
+				params.set('start', String(pageSize * (nextPage - 1)));
+				return url.toString();
+			}
+		}
+
+		// Generic: `page` or `p` (1-based)
+		if (params.has('page')) {
+			params.set('page', String(nextPage));
+			return url.toString();
+		}
+		if (params.has('p')) {
+			params.set('p', String(nextPage));
+			return url.toString();
+		}
+
+		// Generic: `offset`
+		if (params.has('offset')) {
+			const currentOffset = Number(params.get('offset'));
+			if (!Number.isNaN(currentOffset)) {
+				const currentPage = nextPage - 1;
+				const stride = currentPage > 1 ? Math.round(currentOffset / (currentPage - 1)) : 25;
+				params.set('offset', String(stride * (nextPage - 1)));
+				return url.toString();
+			}
+		}
+
+		return null;
+	} catch {
+		return null;
 	}
 }

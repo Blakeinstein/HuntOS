@@ -24,11 +24,13 @@ export {
 	jobBoardRequestContextSchema,
 	paginationContextSchema,
 	routingDecisionSchema,
+	jobTypeEnum,
 	BOARD_AGENT_MAP,
 	type ScrapeResult,
 	type ScrapedJob,
 	type JobBoardRequestContext,
 	type PaginationContext,
 	type RoutingDecision,
-	type JobBoardId
+	type JobBoardId,
+	type JobType
 } from './types';

@@ -148,6 +148,17 @@ export class JobBoardScraperService {
 	 * 5. Parses the agent's text response as JSON and validates with Zod.
 	 * 6. Persists any new job postings as backlog applications.
 	 * 7. Updates the job board's `lastRunAt` timestamp and pagination bookmark.
+	 *
+	 * ### Pagination advancement logic
+	 *
+	 * The agent reports `current_page`, `current_page_url`, and `has_more_pages`
+	 * after each scrape session.
+	 *
+	 * - If `has_more_pages` is `true`, the bookmark is set to `current_page + 1`
+	 *   so the **next** session starts on the page after the one already scraped
+	 *   (avoids re-scraping the same page).
+	 * - If `has_more_pages` is `false`, the bookmark is cleared so the next session
+	 *   starts from the beginning (the board has been fully traversed).
 	 */
 	async scrape(options: ScrapeJobBoardOptions): Promise<ScrapeJobBoardResult> {
 		const errors: string[] = [];
@@ -183,10 +194,14 @@ export class JobBoardScraperService {
 			max_listings: paginationState.maxListings
 		};
 
+		// The target URL the agent should navigate to.
+		// If we have a resume URL from a previous session, start there.
+		// If the caller explicitly overrides the URL, use that instead.
 		const targetUrl = options.url ?? paginationState.resumePageUrl ?? jobBoard.base_url;
 
-		// Resolve the site-specific sub-agent via the registry
-		const entry = this.subAgentRegistry.resolve(targetUrl);
+		// Always resolve the sub-agent against the *base* URL so that pagination
+		// query params (e.g. &start=50) don't accidentally cause a routing mismatch.
+		const entry = this.subAgentRegistry.resolve(jobBoard.base_url);
 		const agentId = entry?.agentId ?? 'job-board-agent.generic';
 		const detectedBoard = entry?.board ?? 'generic';
 
@@ -201,11 +216,12 @@ export class JobBoardScraperService {
 				jobBoardName: jobBoard.name,
 				targetUrl,
 				detectedBoard,
-				agentId
+				agentId,
+				resumePage: paginationContext.resume_page
 			}
 		});
 
-		// 2. Load the user profile for relevance scoring
+		// 2. Load the user profile for context (job preferences, target roles)
 		const profile = await this.profileService.getProfile();
 		const profileJson = JSON.stringify(profile, null, 2);
 
@@ -232,7 +248,10 @@ export class JobBoardScraperService {
 		try {
 			const response = await agent.generate(
 				`Scrape the job board at the configured URL and extract all visible job listings. ` +
-					`Evaluate each listing against the user profile for relevance. ` +
+					`For each listing, extract the job title, company name, location, job type (remote/hybrid/on-site), ` +
+					`salary range, and any visible description or responsibilities. ` +
+					`Do NOT attempt to apply for any jobs or interact with application forms. ` +
+					`You MUST include current_page, current_page_url, and has_more_pages in your JSON response. ` +
 					`Return your final answer as a single JSON object (no surrounding text).`,
 				{
 					requestContext,
@@ -332,23 +351,9 @@ export class JobBoardScraperService {
 			errors.push(`Failed to update lastRunAt: ${message}`);
 		}
 
-		// 8. Update pagination bookmark so the next scrape resumes from here
+		// 8. Update pagination bookmark for the next scrape session
 		try {
-			if (scrapeResult.current_page && scrapeResult.current_page_url) {
-				await this.jobBoardService.updatePaginationState(
-					options.jobBoardId,
-					scrapeResult.current_page,
-					scrapeResult.current_page_url
-				);
-			} else if (scrapeResult.current_page) {
-				// Agent reported a page number but no URL — save what we can
-				await this.jobBoardService.updatePaginationState(
-					options.jobBoardId,
-					scrapeResult.current_page,
-					targetUrl
-				);
-			}
-			// If the agent reported neither, we leave the existing bookmark untouched
+			await this.advancePagination(options.jobBoardId, scrapeResult);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			errors.push(`Failed to update pagination state: ${message}`);
@@ -369,6 +374,7 @@ export class JobBoardScraperService {
 				duplicatesSkipped,
 				currentPage: scrapeResult.current_page,
 				currentPageUrl: scrapeResult.current_page_url,
+				hasMorePages: scrapeResult.has_more_pages,
 				maxListings: paginationContext.max_listings,
 				errors: errors.length > 0 ? errors : undefined
 			}
@@ -384,7 +390,139 @@ export class JobBoardScraperService {
 	}
 
 	/**
+	 * Advances (or resets) the pagination bookmark based on the agent's report.
+	 *
+	 * **Key rules:**
+	 *
+	 * - `has_more_pages === true` → The agent stopped because it hit `max_listings`
+	 *   but there are more results available. Save `current_page + 1` as the resume
+	 *   point so the next session starts on the **next** unscraped page.
+	 *
+	 * - `has_more_pages === false` → The agent exhausted all available results.
+	 *   Clear the bookmark so the next session starts from the beginning (page 1).
+	 *   Job boards refresh their listings over time, so starting over is correct.
+	 *
+	 * - If the agent didn't report pagination fields at all (shouldn't happen with
+	 *   the updated schema, but defensively handled), leave the bookmark untouched.
+	 */
+	private async advancePagination(jobBoardId: number, result: ScrapeResult): Promise<void> {
+		const { current_page, current_page_url, has_more_pages } = result;
+
+		// If the agent didn't report pagination fields, leave the bookmark as-is
+		if (current_page == null || current_page_url == null) {
+			logger.warn('[job-board-scraper] agent omitted pagination fields — bookmark unchanged', {
+				jobBoardId,
+				current_page,
+				current_page_url,
+				has_more_pages
+			});
+			return;
+		}
+
+		if (has_more_pages) {
+			// More pages exist — advance the bookmark to the next page.
+			// We store `current_page + 1` so the next session navigates *past*
+			// the page we just scraped instead of re-scraping it.
+			const nextPage = current_page + 1;
+
+			// Try to compute the next page URL by incrementing the pagination
+			// query parameter in the current URL. If we can't figure it out,
+			// fall back to storing the current URL — the agent prompt instructs
+			// the agent to navigate to resume_page_url, so even if the URL is
+			// slightly stale the agent will still start at the right page number.
+			const nextPageUrl = this.buildNextPageUrl(current_page_url, nextPage) ?? current_page_url;
+
+			logger.info('[job-board-scraper] advancing pagination bookmark', {
+				jobBoardId,
+				scrapedPage: current_page,
+				nextPage,
+				nextPageUrl,
+				has_more_pages
+			});
+
+			await this.jobBoardService.updatePaginationState(jobBoardId, nextPage, nextPageUrl);
+		} else {
+			// No more pages — the board has been fully traversed.
+			// Clear the bookmark so the next session starts from page 1.
+			logger.info('[job-board-scraper] resetting pagination — no more pages', {
+				jobBoardId,
+				scrapedPage: current_page,
+				has_more_pages
+			});
+
+			await this.jobBoardService.resetPaginationState(jobBoardId);
+		}
+	}
+
+	/**
+	 * Attempts to compute the URL for the next page by detecting and incrementing
+	 * common pagination query parameters in the current page URL.
+	 *
+	 * Supports patterns like:
+	 *   - `&start=25`  (LinkedIn — offset-based, increments by page size)
+	 *   - `&page=2`    (generic — 1-based page number)
+	 *   - `&p=2`       (generic — shorthand page number)
+	 *   - `&offset=25` (generic — offset-based)
+	 *
+	 * Returns `null` if no known pagination parameter was detected.
+	 */
+	private buildNextPageUrl(currentUrl: string, nextPage: number): string | null {
+		try {
+			const url = new URL(currentUrl);
+			const params = url.searchParams;
+
+			// LinkedIn: `start` is an offset (items-per-page * (page - 1))
+			if (params.has('start')) {
+				const currentStart = Number(params.get('start'));
+				if (!Number.isNaN(currentStart)) {
+					// Infer page size from the current offset and page number.
+					// If we're on page 2 with start=25, page size = 25.
+					// If we can't infer it, assume 25 (LinkedIn's default).
+					const currentPage = nextPage - 1; // the page we just scraped
+					const pageSize = currentPage > 1 ? Math.round(currentStart / (currentPage - 1)) : 25;
+					params.set('start', String(pageSize * (nextPage - 1)));
+					return url.toString();
+				}
+			}
+
+			// Generic: `page` or `p` (1-based page number)
+			if (params.has('page')) {
+				params.set('page', String(nextPage));
+				return url.toString();
+			}
+			if (params.has('p')) {
+				params.set('p', String(nextPage));
+				return url.toString();
+			}
+
+			// Generic: `offset` (assumes same offset stride)
+			if (params.has('offset')) {
+				const currentOffset = Number(params.get('offset'));
+				if (!Number.isNaN(currentOffset)) {
+					const currentPage = nextPage - 1;
+					const stride = currentPage > 1 ? Math.round(currentOffset / (currentPage - 1)) : 25;
+					params.set('offset', String(stride * (nextPage - 1)));
+					return url.toString();
+				}
+			}
+
+			// No recognised pagination param — return null so the caller can
+			// fall back to storing the current URL.
+			return null;
+		} catch {
+			// URL parsing failed — not a valid URL
+			return null;
+		}
+	}
+
+	/**
 	 * Persists scraped jobs as backlog applications, tracking new vs duplicate counts.
+	 *
+	 * Only listing details are stored — no form fields are generated since
+	 * the scraper's sole job is to collect job postings, not apply for them.
+	 *
+	 * Uses the `{ id, isNew }` return value from `addApplicationFromJob` to
+	 * accurately count new inserts vs duplicates that already existed.
 	 */
 	private async persistJobs(
 		jobBoardId: number,
@@ -400,21 +538,24 @@ export class JobBoardScraperService {
 				title: job.title,
 				company: job.company,
 				location: job.location,
+				job_type: job.job_type ?? 'unknown',
 				salary_range: job.salary_range,
+				description: job.description,
 				job_description_url: job.url,
 				posted_at: job.posted_at ?? new Date().toISOString(),
 				created_at: new Date().toISOString()
 			};
 
 			try {
-				const appId = await this.jobBoardService.addApplicationFromJob(posting);
-				if (appId > 0) {
+				const { isNew } = await this.jobBoardService.addApplicationFromJob(posting);
+				if (isNew) {
 					newApplications++;
+				} else {
+					duplicatesSkipped++;
 				}
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				errors.push(`Failed to persist job "${job.title}" at ${job.company}: ${message}`);
-				duplicatesSkipped++;
 			}
 		}
 
