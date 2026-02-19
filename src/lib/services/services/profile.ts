@@ -1,5 +1,23 @@
 import type { Database } from './database';
 
+/** A single user-managed link with title, URL, and optional description. */
+export interface ProfileLink {
+	id: string;
+	title: string;
+	url: string;
+	description: string;
+}
+
+/** Default links seeded for new profiles. */
+const DEFAULT_PROFILE_LINKS: ProfileLink[] = [
+	{
+		id: 'linkedin',
+		title: 'LinkedIn',
+		url: '',
+		description: 'My professional profile'
+	}
+];
+
 export type ProfileKey =
 	| 'name'
 	| 'email'
@@ -16,7 +34,57 @@ export type ProfileKey =
 	| 'availability'
 	| 'resume_summary'
 	| 'portfolio_url'
-	| 'linkedin_url';
+	| 'linkedin_url'
+	// Job search preferences
+	| 'desired_location'
+	| 'desired_job_type'
+	| 'desired_work_arrangement'
+	| 'job_search_criteria'
+	| 'years_of_experience'
+	// Supplemental links (stored as JSON array)
+	| 'github_url'
+	| 'website_urls'
+	// Dynamic links list (stored as JSON array of ProfileLink objects)
+	| 'profile_links'
+	// Projects
+	| 'projects'
+	// Comprehensive semi-structured description used by other agents
+	| 'profile_description'
+	// Raw content extracted from resume uploads
+	| 'resume_raw_text'
+	// Raw content scraped from external links
+	| 'scraped_content';
+
+const VALID_PROFILE_KEYS: ProfileKey[] = [
+	'name',
+	'email',
+	'phone',
+	'location',
+	'skills',
+	'experience',
+	'education',
+	'certifications',
+	'languages',
+	'preferred_companies',
+	'job_titles',
+	'salary_expectations',
+	'availability',
+	'resume_summary',
+	'portfolio_url',
+	'linkedin_url',
+	'desired_location',
+	'desired_job_type',
+	'desired_work_arrangement',
+	'job_search_criteria',
+	'years_of_experience',
+	'github_url',
+	'website_urls',
+	'profile_links',
+	'projects',
+	'profile_description',
+	'resume_raw_text',
+	'scraped_content'
+];
 
 export interface ProfileData {
 	[key: string]: string | string[];
@@ -25,7 +93,7 @@ export interface ProfileData {
 export interface ProfileUpdate {
 	key: ProfileKey;
 	value: string | string[];
-	source: 'manual' | 'llm' | 'job_match';
+	source: 'manual' | 'llm' | 'job_match' | 'resume_parse' | 'scrape';
 }
 
 export class ProfileService {
@@ -70,6 +138,46 @@ export class ProfileService {
 	}
 
 	/**
+	 * Bulk update multiple profile keys at once.
+	 * Returns the list of keys that were updated.
+	 */
+	async updateProfileBulk(updates: ProfileUpdate[]): Promise<ProfileKey[]> {
+		const updated: ProfileKey[] = [];
+		for (const { key, value } of updates) {
+			if (!this.isValidProfileKey(key)) {
+				console.warn(`Skipping invalid profile key: ${key}`);
+				continue;
+			}
+			await this.updateProfile(key, value);
+			updated.push(key);
+		}
+		return updated;
+	}
+
+	/**
+	 * Append to an array-typed profile field rather than overwriting.
+	 * If the field doesn't exist yet, it is created as a new array.
+	 */
+	async appendToProfile(key: ProfileKey, items: string[]): Promise<void> {
+		const existing = await this.getProfile(key);
+		const current = existing[key];
+		let merged: string[];
+
+		if (Array.isArray(current)) {
+			const set = new Set([...current, ...items]);
+			merged = [...set];
+		} else if (typeof current === 'string' && current.length > 0) {
+			// If existing value is a plain string, convert to array
+			const set = new Set([current, ...items]);
+			merged = [...set];
+		} else {
+			merged = items;
+		}
+
+		await this.updateProfile(key, merged);
+	}
+
+	/**
 	 * Parse profile value from database
 	 */
 	private parseValue(value: string): string | string[] {
@@ -86,8 +194,6 @@ export class ProfileService {
 	async analyzeJobDescription(jobDescription: string): Promise<ProfileMatchAnalysis> {
 		const profile = await this.getProfile();
 
-		// This is a placeholder. In a real implementation, you would use an LLM
-		// or other NLP techniques to analyze the job description against the profile.
 		console.log('Analyzing job description (placeholder):', jobDescription.substring(0, 100));
 
 		return {
@@ -102,8 +208,6 @@ export class ProfileService {
 	 * Suggest profile updates based on job requirements
 	 */
 	async suggestProfileUpdates(jobDescription: string): Promise<ProfileUpdateSuggestion[]> {
-		// This is a placeholder. In a real implementation, you would use an LLM
-		// to generate suggestions.
 		console.log(
 			'Suggesting profile updates for job description (placeholder):',
 			jobDescription.substring(0, 100)
@@ -112,36 +216,131 @@ export class ProfileService {
 	}
 
 	/**
-	 * Get profile completeness score
+	 * Get profile completeness score.
+	 * Weights different categories to give a more meaningful score.
 	 */
 	async getCompletenessScore(): Promise<number> {
-		const requiredKeys: ProfileKey[] = ['name', 'email', 'phone', 'skills', 'experience'];
 		const profile = await this.getProfile();
 
-		let filledCount = 0;
-		const totalCount = requiredKeys.length;
+		const requiredFields: { key: ProfileKey; weight: number }[] = [
+			{ key: 'name', weight: 1 },
+			{ key: 'email', weight: 1 },
+			{ key: 'phone', weight: 1 },
+			{ key: 'skills', weight: 2 },
+			{ key: 'experience', weight: 2 }
+		];
 
-		for (const key of requiredKeys) {
+		const bonusFields: { key: ProfileKey; weight: number }[] = [
+			{ key: 'education', weight: 1 },
+			{ key: 'desired_location', weight: 1 },
+			{ key: 'desired_job_type', weight: 1 },
+			{ key: 'job_titles', weight: 1 },
+			{ key: 'resume_summary', weight: 1 },
+			{ key: 'profile_description', weight: 2 },
+			{ key: 'projects', weight: 1 }
+		];
+
+		const allFields = [...requiredFields, ...bonusFields];
+		let totalWeight = 0;
+		let filledWeight = 0;
+
+		for (const { key, weight } of allFields) {
+			totalWeight += weight;
 			const value = profile[key];
 			if (value && (typeof value === 'string' ? value.length > 0 : value.length > 0)) {
-				filledCount++;
+				filledWeight += weight;
 			}
 		}
 
-		return Math.round((filledCount / totalCount) * 100);
+		return totalWeight > 0 ? Math.round((filledWeight / totalWeight) * 100) : 0;
 	}
 
 	/**
 	 * Get incomplete profile fields
 	 */
 	async getIncompleteFields(): Promise<ProfileKey[]> {
-		const requiredKeys: ProfileKey[] = ['name', 'email', 'phone', 'skills', 'experience'];
+		const requiredKeys: ProfileKey[] = [
+			'name',
+			'email',
+			'phone',
+			'skills',
+			'experience',
+			'desired_location',
+			'desired_job_type',
+			'job_titles'
+		];
 		const profile = await this.getProfile();
 
 		return requiredKeys.filter((key) => {
 			const value = profile[key];
 			return !value || (typeof value === 'string' ? value.length === 0 : value.length === 0);
 		});
+	}
+
+	/**
+	 * Get the comprehensive profile description for use by other agents.
+	 * Returns null if not yet generated.
+	 */
+	async getProfileDescription(): Promise<string | null> {
+		const profile = await this.getProfile('profile_description');
+		const desc = profile['profile_description'];
+		if (!desc) return null;
+		return typeof desc === 'string' ? desc : desc.join('\n');
+	}
+
+	// ── Profile Links helpers ─────────────────────────────────────────
+
+	/**
+	 * Get the user's links list. Seeds defaults if none exist yet.
+	 */
+	async getProfileLinks(): Promise<ProfileLink[]> {
+		const profile = await this.getProfile('profile_links');
+		const raw = profile['profile_links'];
+
+		if (!raw) {
+			// First access — seed with defaults and persist
+			await this.updateProfile('profile_links', JSON.stringify(DEFAULT_PROFILE_LINKS));
+			return [...DEFAULT_PROFILE_LINKS];
+		}
+
+		try {
+			const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Replace the entire links list (used after add / edit / remove / reorder on the client).
+	 */
+	async saveProfileLinks(links: ProfileLink[]): Promise<void> {
+		await this.updateProfile('profile_links', JSON.stringify(links));
+	}
+
+	/**
+	 * Upsert a single link by its id. If the id doesn't exist yet, the link is appended.
+	 */
+	async upsertProfileLink(link: ProfileLink): Promise<ProfileLink[]> {
+		const links = await this.getProfileLinks();
+		const idx = links.findIndex((l) => l.id === link.id);
+		if (idx >= 0) {
+			links[idx] = link;
+		} else {
+			links.push(link);
+		}
+		await this.saveProfileLinks(links);
+		return links;
+	}
+
+	/**
+	 * Remove a link by id.
+	 */
+	async removeProfileLink(id: string): Promise<ProfileLink[]> {
+		let links = await this.getProfileLinks();
+		links = links.filter((l) => l.id !== id);
+		await this.saveProfileLinks(links);
+		return links;
 	}
 
 	/**
@@ -152,7 +351,10 @@ export class ProfileService {
 
 		switch (normalizedTopic) {
 			case 'skills': {
-				const skills = response.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+				const skills = response
+					.split(',')
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
 				await this.updateProfile('skills', skills);
 				break;
 			}
@@ -160,12 +362,14 @@ export class ProfileService {
 				await this.updateProfile('experience', response);
 				break;
 			case 'job_titles': {
-				const titles = response.split(',').map((t) => t.trim()).filter((t) => t.length > 0);
+				const titles = response
+					.split(',')
+					.map((t) => t.trim())
+					.filter((t) => t.length > 0);
 				await this.updateProfile('job_titles', titles);
 				break;
 			}
 			default:
-				// Be careful with this, ensure normalizedTopic is a valid ProfileKey
 				if (this.isValidProfileKey(normalizedTopic)) {
 					await this.updateProfile(normalizedTopic, response);
 				} else {
@@ -175,26 +379,8 @@ export class ProfileService {
 		}
 	}
 
-	private isValidProfileKey(key: string): key is ProfileKey {
-		const validKeys: ProfileKey[] = [
-			'name',
-			'email',
-			'phone',
-			'location',
-			'skills',
-			'experience',
-			'education',
-			'certifications',
-			'languages',
-			'preferred_companies',
-			'job_titles',
-			'salary_expectations',
-			'availability',
-			'resume_summary',
-			'portfolio_url',
-			'linkedin_url'
-		];
-		return validKeys.includes(key as ProfileKey);
+	isValidProfileKey(key: string): key is ProfileKey {
+		return VALID_PROFILE_KEYS.includes(key as ProfileKey);
 	}
 }
 

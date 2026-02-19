@@ -1,6 +1,7 @@
 import path from 'path';
 import sqlite3 from 'better-sqlite3';
 import fs from 'fs';
+import * as sqliteVec from 'sqlite-vec';
 
 export class Database {
 	private db: sqlite3.Database;
@@ -13,6 +14,10 @@ export class Database {
 		}
 
 		this.db = new sqlite3(finalDbPath, { verbose: console.log });
+
+		// Load the sqlite-vec extension for vector similarity search
+		sqliteVec.load(this.db);
+
 		this.init();
 	}
 
@@ -156,7 +161,7 @@ export class Database {
 
       CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT NOT NULL,          -- 'scrape', 'browser', 'resume', 'agent'
+        category TEXT NOT NULL,          -- 'scrape', 'browser', 'resume', 'agent', 'profile'
         agent_id TEXT,                   -- e.g. 'job-board-agent.linkedin'
         status TEXT NOT NULL DEFAULT 'info', -- 'info', 'success', 'warning', 'error'
         title TEXT NOT NULL,             -- short summary line
@@ -169,7 +174,52 @@ export class Database {
       CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_status ON audit_logs(status);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+      -- ── Documents ─────────────────────────────────────────────────
+      -- User-uploaded documents (resumes, cover letters, certificates, etc.)
+      CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 1,
+        filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'text', -- 'text', 'pdf', 'html', 'markdown'
+        raw_text TEXT NOT NULL,                     -- full extracted plain-text
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        chunk_count INTEGER NOT NULL DEFAULT 0,     -- populated after chunking
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      -- Individual chunks from documents (metadata side-table for the vec0 index)
+      CREATE TABLE IF NOT EXISTS document_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id INTEGER NOT NULL,
+        chunk_index INTEGER NOT NULL,       -- ordinal position in the document
+        text TEXT NOT NULL,                  -- the chunk text
+        metadata TEXT,                       -- JSON blob (headers, page number, etc.)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
     `);
+
+		// ── sqlite-vec virtual table ────────────────────────────────
+		// vec0 virtual tables cannot use IF NOT EXISTS, so we guard manually.
+		const vecTableExists = this.get<{ name: string }>(
+			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'document_chunks_vec'`
+		);
+		if (!vecTableExists) {
+			// 384 dimensions — matches a compact embedding model (e.g. text-embedding-3-small @ 384d)
+			// The chunk_id column links back to document_chunks.id for metadata lookups.
+			this.db.exec(`
+        CREATE VIRTUAL TABLE document_chunks_vec USING vec0(
+          chunk_id INTEGER PRIMARY KEY,
+          embedding float[384]
+        );
+      `);
+		}
 
 		// ── Migrations for existing databases ───────────────────────────
 		// SQLite's CREATE TABLE IF NOT EXISTS won't add new columns to an
@@ -200,6 +250,14 @@ export class Database {
 				'user@example.com'
 			]);
 		}
+	}
+
+	/**
+	 * Expose the raw better-sqlite3 handle for advanced operations
+	 * (e.g. sqlite-vec queries that need prepared statement binding with typed arrays).
+	 */
+	get raw(): sqlite3.Database {
+		return this.db;
 	}
 
 	/**

@@ -18,7 +18,11 @@ import { logger } from './logger';
 
 const services = createServices(db);
 
-const profileAgent = createProfileAgent(services.profileService);
+const profileAgent = createProfileAgent(
+	services.profileService,
+	services.auditLogService,
+	services.documentService
+);
 const jobBoardAgent = createJobBoardAgent();
 
 // Site-specific sub-agents — each is registered with dot-notation keys

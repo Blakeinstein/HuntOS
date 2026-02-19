@@ -8,6 +8,7 @@ import { JobBoardScraperService } from '$lib/services/services/jobBoardScraper';
 import { EmailMonitorService } from '$lib/services/services/emailMonitor';
 import { BrowserAgentService } from '$lib/services/services/browserAgent';
 import { AuditLogService } from '$lib/services/services/auditLog';
+import { DocumentService } from '$lib/services/services/document';
 import type { Mastra } from '@mastra/core';
 import type { SubAgentRegistry } from '$lib/mastra/agents/job-board-agent/registry';
 
@@ -21,6 +22,7 @@ export interface ServiceContainer {
 	emailMonitorService: EmailMonitorService;
 	browserAgentService: BrowserAgentService;
 	auditLogService: AuditLogService;
+	documentService: DocumentService;
 
 	/**
 	 * Wire late-bound services that depend on the Mastra instance.
@@ -35,6 +37,7 @@ export function createServices(db: Database): ServiceContainer {
 	const resumeService = new ResumeService(db, profileService);
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
+	const documentService = new DocumentService(db, auditLogService);
 
 	const container: ServiceContainer = {
 		applicationService: new ApplicationService(db),
@@ -46,6 +49,7 @@ export function createServices(db: Database): ServiceContainer {
 		emailMonitorService: new EmailMonitorService(db),
 		browserAgentService: new BrowserAgentService(db, profileService, resumeService),
 		auditLogService,
+		documentService,
 
 		withMastra(mastra: Mastra, subAgentRegistry: SubAgentRegistry) {
 			container.jobBoardScraperService = new JobBoardScraperService(

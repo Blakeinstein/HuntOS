@@ -18,22 +18,42 @@ const profileKeyEnum = z.enum([
 	'availability',
 	'resume_summary',
 	'portfolio_url',
-	'linkedin_url'
+	'linkedin_url',
+	// Job search preferences
+	'desired_location',
+	'desired_job_type',
+	'desired_work_arrangement',
+	'job_search_criteria',
+	'years_of_experience',
+	// Supplemental links
+	'github_url',
+	'website_urls',
+	// Projects
+	'projects',
+	// Comprehensive description (prefer saveProfileDescription tool for this)
+	'profile_description',
+	// Raw content fields (typically set by other tools, not directly)
+	'resume_raw_text',
+	'scraped_content'
 ]);
 
 export function createUpdateProfileTool(profileService: ProfileService) {
 	return createTool({
 		id: 'update-user-profile',
 		description:
-			'Update the user profile with structured data extracted from the conversation. ' +
+			'Update a single field in the user profile with structured data extracted from the conversation. ' +
 			'Use this tool whenever the user provides information about their professional background, ' +
-			'skills, experience, education, contact details, or job preferences.',
+			'skills, experience, education, contact details, job preferences, or links. ' +
+			'For saving the comprehensive profile description, prefer the saveProfileDescription tool instead. ' +
+			'For array-type fields (skills, certifications, languages, job_titles, preferred_companies, website_urls), ' +
+			'pass the value as an array of strings.',
 		inputSchema: z.object({
 			key: profileKeyEnum.describe('The profile field to update'),
 			value: z
 				.union([z.string(), z.array(z.string())])
 				.describe(
-					'The value to set. Use an array for fields like skills, certifications, languages, job_titles, and preferred_companies.'
+					'The value to set. Use an array for list-like fields such as skills, certifications, ' +
+						'languages, job_titles, preferred_companies, and website_urls.'
 				)
 		}),
 		outputSchema: z.object({
@@ -62,8 +82,9 @@ export function createGetProfileTool(profileService: ProfileService) {
 	return createTool({
 		id: 'get-user-profile',
 		description:
-			'Retrieve the current user profile data. Use this to check what information ' +
-			'has already been provided before asking the user for more details.',
+			'Retrieve the current user profile data. Call this at the START of every conversation ' +
+			'to understand what information has already been collected. You can fetch the full profile ' +
+			'or a specific field. The completeness score tells you how much of the profile is filled in.',
 		inputSchema: z.object({
 			key: profileKeyEnum
 				.optional()
@@ -96,7 +117,9 @@ export function createGetIncompleteFieldsTool(profileService: ProfileService) {
 		id: 'get-incomplete-fields',
 		description:
 			'Check which required profile fields are still missing or incomplete. ' +
-			'Use this to guide the user on what information they still need to provide.',
+			'Use this to determine what questions to ask next and to guide the user toward ' +
+			'a complete profile. Required fields include: name, email, phone, skills, experience, ' +
+			'desired_location, desired_job_type, and job_titles.',
 		inputSchema: z.object({}),
 		outputSchema: z.object({
 			incompleteFields: z.array(z.string()),
@@ -106,11 +129,11 @@ export function createGetIncompleteFieldsTool(profileService: ProfileService) {
 		execute: async () => {
 			try {
 				const incompleteFields = await profileService.getIncompleteFields();
-				const requiredCount = 5; // matches ProfileService.getCompletenessScore required keys
+				const totalRequired = 8; // matches the updated required keys in ProfileService
 				return {
 					incompleteFields,
-					totalRequired: requiredCount,
-					filledCount: requiredCount - incompleteFields.length
+					totalRequired,
+					filledCount: totalRequired - incompleteFields.length
 				};
 			} catch (error) {
 				console.error('Failed to get incomplete fields:', error);

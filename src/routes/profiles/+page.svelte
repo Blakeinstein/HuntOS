@@ -13,19 +13,26 @@
 		SaveIcon,
 		CheckCircleIcon,
 		AlertCircleIcon,
-		MessageSquareIcon
+		MessageSquareIcon,
+		FileTextIcon,
+		TargetIcon
 	} from '@lucide/svelte';
+	import ProfileChat from '$lib/components/ProfileChat.svelte';
+	import DocumentsPanel from '$lib/components/DocumentsPanel.svelte';
+	import LinksManager from '$lib/components/LinksManager.svelte';
 
 	let { data } = $props();
 
 	const completeness = $derived(data.completeness ?? 0);
 	const incompleteFields = $derived(data.incompleteFields ?? []);
 	const profileData = $derived(data.profile ?? {});
+	const documents = $derived(data.documents ?? []);
+	const profileLinks = $derived(data.profileLinks ?? []);
 
 	let formState = $state<Record<string, string | string[]>>({});
 	let isSaving = $state(false);
 	let saveSuccess = $state(false);
-	let activeTab = $state('personal');
+	let activeTab = $state('chat');
 
 	const mergedProfile = $derived.by(() => ({ ...profileData, ...formState }));
 
@@ -47,10 +54,57 @@
 		},
 		{
 			key: 'location',
-			label: 'Location',
+			label: 'Current Location',
 			type: 'text',
 			icon: MapPinIcon,
 			placeholder: 'San Francisco, CA'
+		}
+	];
+
+	const preferencesFields = [
+		{
+			key: 'job_titles',
+			label: 'Target Job Titles',
+			type: 'text',
+			icon: TargetIcon,
+			placeholder: 'Senior Frontend Engineer, Full-Stack Developer',
+			hint: 'Comma-separated list of target roles'
+		},
+		{
+			key: 'desired_location',
+			label: 'Desired Work Location',
+			type: 'text',
+			icon: MapPinIcon,
+			placeholder: 'Remote, New York, London'
+		},
+		{
+			key: 'desired_job_type',
+			label: 'Job Type',
+			type: 'text',
+			icon: BriefcaseIcon,
+			placeholder: 'Full-time, Contract'
+		},
+		{
+			key: 'desired_work_arrangement',
+			label: 'Work Arrangement',
+			type: 'text',
+			icon: BriefcaseIcon,
+			placeholder: 'Remote, Hybrid, On-site'
+		},
+		{
+			key: 'salary_expectations',
+			label: 'Salary Expectations',
+			type: 'text',
+			icon: BriefcaseIcon,
+			placeholder: '$120k–$160k'
+		},
+		{
+			key: 'job_search_criteria',
+			label: 'Specific Criteria / Dealbreakers',
+			type: 'textarea',
+			icon: TargetIcon,
+			placeholder:
+				'Must have visa sponsorship, prefer companies > 100 employees, interested in fintech...'
 		}
 	];
 
@@ -64,11 +118,25 @@
 			hint: 'Comma-separated list of skills'
 		},
 		{
+			key: 'years_of_experience',
+			label: 'Years of Experience',
+			type: 'text',
+			icon: BriefcaseIcon,
+			placeholder: '8'
+		},
+		{
 			key: 'experience',
 			label: 'Experience Summary',
 			type: 'textarea',
 			icon: BriefcaseIcon,
 			placeholder: 'Describe your work experience...'
+		},
+		{
+			key: 'projects',
+			label: 'Notable Projects',
+			type: 'textarea',
+			icon: WrenchIcon,
+			placeholder: 'Open-source contributions, side projects, freelance work...'
 		},
 		{
 			key: 'education',
@@ -83,23 +151,6 @@
 			type: 'textarea',
 			icon: BriefcaseIcon,
 			placeholder: 'A brief professional summary for your resume...'
-		}
-	];
-
-	const linkFields = [
-		{
-			key: 'linkedin_url',
-			label: 'LinkedIn URL',
-			type: 'url',
-			icon: LinkIcon,
-			placeholder: 'https://linkedin.com/in/yourname'
-		},
-		{
-			key: 'portfolio_url',
-			label: 'Portfolio URL',
-			type: 'url',
-			icon: LinkIcon,
-			placeholder: 'https://yourportfolio.com'
 		}
 	];
 
@@ -140,7 +191,94 @@
 			isSaving = false;
 		}
 	}
+
+	/**
+	 * Renders a field group — shared between the personal, preferences, and professional tabs.
+	 */
+	type FieldDef = {
+		key: string;
+		label: string;
+		type: string;
+		icon: typeof UserIcon;
+		placeholder: string;
+		hint?: string;
+	};
 </script>
+
+{#snippet fieldCard(field: FieldDef, layout: 'card' | 'inline')}
+	{@const Icon = field.icon}
+	{@const incomplete = isFieldIncomplete(field.key)}
+
+	{#if layout === 'card'}
+		<div class="card border border-surface-200-800 bg-surface-50-950 p-5">
+			<label class="label">
+				<span class="flex items-center gap-1.5 text-sm font-bold">
+					<Icon class="size-4 text-primary-500" />
+					{field.label}
+					{#if incomplete}
+						<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
+					{/if}
+				</span>
+				{#if field.hint}
+					<p class="mt-0.5 text-xs opacity-50">{field.hint}</p>
+				{/if}
+				{#if field.type === 'textarea'}
+					<textarea
+						class="mt-2 textarea"
+						class:border-warning-500={incomplete}
+						rows="4"
+						placeholder={field.placeholder}
+						value={getFieldValue(field.key)}
+						oninput={(e) => handleInput(field.key, e.currentTarget.value)}
+					></textarea>
+				{:else}
+					<input
+						type={field.type}
+						class="mt-2 input"
+						class:border-warning-500={incomplete}
+						placeholder={field.placeholder}
+						value={getFieldValue(field.key)}
+						oninput={(e) => handleInput(field.key, e.currentTarget.value)}
+					/>
+				{/if}
+			</label>
+		</div>
+	{:else}
+		<label class="label">
+			<span class="flex items-center gap-1.5 text-sm font-medium">
+				<Icon class="size-3.5 opacity-50" />
+				{field.label}
+				{#if incomplete}
+					<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
+				{/if}
+			</span>
+			{#if field.hint}
+				<p class="mt-0.5 text-xs opacity-50">{field.hint}</p>
+			{/if}
+			<div class="relative mt-1">
+				{#if field.type === 'textarea'}
+					<textarea
+						class="textarea"
+						class:border-warning-500={incomplete}
+						rows="3"
+						placeholder={field.placeholder}
+						value={getFieldValue(field.key)}
+						oninput={(e) => handleInput(field.key, e.currentTarget.value)}
+					></textarea>
+				{:else}
+					<input
+						type={field.type}
+						class="input"
+						class:border-warning-500={incomplete}
+						placeholder={field.placeholder}
+						value={getFieldValue(field.key)}
+						oninput={(e) => handleInput(field.key, e.currentTarget.value)}
+					/>
+				{/if}
+			</div>
+		</label>
+	{/if}
+{/snippet}
 
 <div class="mx-auto max-w-4xl space-y-6">
 	<!-- Page header -->
@@ -148,26 +286,28 @@
 		<div>
 			<h1 class="h3 font-bold">Profile</h1>
 			<p class="text-sm opacity-60">
-				Keep your profile updated so the automation agent can fill out applications accurately.
+				Build your profile with the AI assistant, upload documents, or edit details manually.
 			</p>
 		</div>
-		<button
-			type="button"
-			class="btn gap-2 preset-filled-primary-500"
-			disabled={isSaving}
-			onclick={saveProfile}
-		>
-			{#if isSaving}
-				<span class="animate-spin">⏳</span>
-				<span>Saving...</span>
-			{:else if saveSuccess}
-				<CheckCircleIcon class="size-4" />
-				<span>Saved!</span>
-			{:else}
-				<SaveIcon class="size-4" />
-				<span>Save Profile</span>
-			{/if}
-		</button>
+		{#if activeTab !== 'chat' && activeTab !== 'documents'}
+			<button
+				type="button"
+				class="btn gap-2 preset-filled-primary-500"
+				disabled={isSaving}
+				onclick={saveProfile}
+			>
+				{#if isSaving}
+					<span class="animate-spin">⏳</span>
+					<span>Saving...</span>
+				{:else if saveSuccess}
+					<CheckCircleIcon class="size-4" />
+					<span>Saved!</span>
+				{:else}
+					<SaveIcon class="size-4" />
+					<span>Save Profile</span>
+				{/if}
+			</button>
+		{/if}
 	</div>
 
 	<!-- Completeness card -->
@@ -200,11 +340,30 @@
 	</div>
 
 	<!-- Tabbed sections -->
-	<Tabs value={activeTab} onValueChange={(details) => (activeTab = details.value ?? 'personal')}>
+	<Tabs value={activeTab} onValueChange={(details) => (activeTab = details.value ?? 'chat')}>
 		<Tabs.List>
+			<Tabs.Trigger value="chat">
+				<MessageSquareIcon class="mr-1.5 size-4" />
+				AI Builder
+			</Tabs.Trigger>
+			<Tabs.Trigger value="documents">
+				<FileTextIcon class="mr-1.5 size-4" />
+				Documents
+				{#if documents.length > 0}
+					<span
+						class="ml-1 rounded-full bg-primary-500/20 px-1.5 py-0.5 text-[10px] font-bold text-primary-500"
+					>
+						{documents.length}
+					</span>
+				{/if}
+			</Tabs.Trigger>
 			<Tabs.Trigger value="personal">
 				<UserIcon class="mr-1.5 size-4" />
 				Personal
+			</Tabs.Trigger>
+			<Tabs.Trigger value="preferences">
+				<TargetIcon class="mr-1.5 size-4" />
+				Preferences
 			</Tabs.Trigger>
 			<Tabs.Trigger value="professional">
 				<BriefcaseIcon class="mr-1.5 size-4" />
@@ -214,12 +373,22 @@
 				<LinkIcon class="mr-1.5 size-4" />
 				Links
 			</Tabs.Trigger>
-			<Tabs.Trigger value="chat">
-				<MessageSquareIcon class="mr-1.5 size-4" />
-				AI Builder
-			</Tabs.Trigger>
 			<Tabs.Indicator />
 		</Tabs.List>
+
+		<!-- AI Builder tab (default) -->
+		<Tabs.Content value="chat">
+			<div class="mt-4">
+				<ProfileChat />
+			</div>
+		</Tabs.Content>
+
+		<!-- Documents tab -->
+		<Tabs.Content value="documents">
+			<div class="mt-4">
+				<DocumentsPanel {documents} />
+			</div>
+		</Tabs.Content>
 
 		<!-- Personal Info tab -->
 		<Tabs.Content value="personal">
@@ -230,29 +399,18 @@
 				</h2>
 				<div class="grid gap-4 md:grid-cols-2">
 					{#each personalFields as field (field.key)}
-						{@const Icon = field.icon}
-						{@const incomplete = isFieldIncomplete(field.key)}
-						<label class="label">
-							<span class="flex items-center gap-1.5 text-sm font-medium">
-								<Icon class="size-3.5 opacity-50" />
-								{field.label}
-								{#if incomplete}
-									<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
-								{/if}
-							</span>
-							<div class="relative mt-1">
-								<input
-									type={field.type}
-									class="input"
-									class:border-warning-500={incomplete}
-									placeholder={field.placeholder}
-									value={getFieldValue(field.key)}
-									oninput={(e) => handleInput(field.key, e.currentTarget.value)}
-								/>
-							</div>
-						</label>
+						{@render fieldCard(field, 'inline')}
 					{/each}
 				</div>
+			</div>
+		</Tabs.Content>
+
+		<!-- Job Preferences tab -->
+		<Tabs.Content value="preferences">
+			<div class="mt-4 space-y-4">
+				{#each preferencesFields as field (field.key)}
+					{@render fieldCard(field, field.type === 'textarea' ? 'card' : 'card')}
+				{/each}
 			</div>
 		</Tabs.Content>
 
@@ -260,41 +418,7 @@
 		<Tabs.Content value="professional">
 			<div class="mt-4 space-y-4">
 				{#each professionalFields as field (field.key)}
-					{@const Icon = field.icon}
-					{@const incomplete = isFieldIncomplete(field.key)}
-					<div class="card border border-surface-200-800 bg-surface-50-950 p-5">
-						<label class="label">
-							<span class="flex items-center gap-1.5 text-sm font-bold">
-								<Icon class="size-4 text-primary-500" />
-								{field.label}
-								{#if incomplete}
-									<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
-								{/if}
-							</span>
-							{#if field.hint}
-								<p class="mt-0.5 text-xs opacity-50">{field.hint}</p>
-							{/if}
-							{#if field.type === 'textarea'}
-								<textarea
-									class="mt-2 textarea"
-									class:border-warning-500={incomplete}
-									rows="4"
-									placeholder={field.placeholder}
-									value={getFieldValue(field.key)}
-									oninput={(e) => handleInput(field.key, e.currentTarget.value)}
-								></textarea>
-							{:else}
-								<input
-									type={field.type}
-									class="mt-2 input"
-									class:border-warning-500={incomplete}
-									placeholder={field.placeholder}
-									value={getFieldValue(field.key)}
-									oninput={(e) => handleInput(field.key, e.currentTarget.value)}
-								/>
-							{/if}
-						</label>
-					</div>
+					{@render fieldCard(field, 'card')}
 				{/each}
 			</div>
 		</Tabs.Content>
@@ -302,49 +426,7 @@
 		<!-- Links tab -->
 		<Tabs.Content value="links">
 			<div class="mt-4 card border border-surface-200-800 bg-surface-50-950 p-5">
-				<h2 class="mb-4 flex items-center gap-2 text-sm font-bold">
-					<LinkIcon class="size-4 text-primary-500" />
-					Online Profiles & Links
-				</h2>
-				<div class="grid gap-4 md:grid-cols-1">
-					{#each linkFields as field (field.key)}
-						{@const Icon = field.icon}
-						<label class="label">
-							<span class="flex items-center gap-1.5 text-sm font-medium">
-								<Icon class="size-3.5 opacity-50" />
-								{field.label}
-							</span>
-							<input
-								type={field.type}
-								class="mt-1 input"
-								placeholder={field.placeholder}
-								value={getFieldValue(field.key)}
-								oninput={(e) => handleInput(field.key, e.currentTarget.value)}
-							/>
-						</label>
-					{/each}
-				</div>
-			</div>
-		</Tabs.Content>
-
-		<!-- AI Builder tab (placeholder) -->
-		<Tabs.Content value="chat">
-			<div class="mt-4 card border border-surface-200-800 bg-surface-50-950 p-8">
-				<div class="flex flex-col items-center justify-center text-center">
-					<div class="flex size-16 items-center justify-center rounded-full bg-primary-500/10">
-						<MessageSquareIcon class="size-8 text-primary-500" />
-					</div>
-					<h2 class="mt-4 h5 font-bold">AI Profile Builder</h2>
-					<p class="mt-2 max-w-md text-sm opacity-60">
-						Converse with an AI assistant to build your professional profile. The assistant will ask
-						targeted questions about your experience, skills, and preferences to fill out your
-						profile automatically.
-					</p>
-					<p class="mt-4 text-xs opacity-40">
-						This feature requires Mastra integration and is not yet implemented.
-					</p>
-					<button type="button" class="mt-4 btn preset-tonal" disabled> Coming Soon </button>
-				</div>
+				<LinksManager links={profileLinks} />
 			</div>
 		</Tabs.Content>
 	</Tabs>
