@@ -234,16 +234,23 @@
 
 					const result = await res.json();
 
-					// Read file content to include in the message for the agent
-					const fileText = await file.text();
+					// Use server-extracted text (handles PDF, DOCX, etc.) instead of raw file.text()
+					const fileText: string = result.extractedText || '';
 					const truncated =
 						fileText.length > 20_000
 							? fileText.substring(0, 20_000) + '\n\n[... content truncated ...]'
 							: fileText;
 
+					const formatInfo = result.extraction?.format
+						? ` [${result.extraction.format.toUpperCase()}]`
+						: '';
+					const pageInfo = result.extraction?.pageCount
+						? `, ${result.extraction.pageCount} page(s)`
+						: '';
+
 					parts.push(
-						`📎 **Uploaded file: ${result.filename}** (${formatBytes(file.size)})\n\n` +
-							`Here is the content of the file:\n\n${truncated}`
+						`📎 **Uploaded file: ${result.filename}**${formatInfo} (${formatBytes(file.size)}${pageInfo})\n\n` +
+							`Here is the extracted content of the file:\n\n${truncated}`
 					);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : 'Upload failed';
@@ -356,7 +363,8 @@
 		) as DynamicToolUIPart[];
 	}
 
-	function formatToolName(name: string): string {
+	function formatToolName(name?: string): string {
+		if (!name) return 'Tool';
 		return name
 			.replace(/([A-Z])/g, ' $1')
 			.replace(/-/g, ' ')

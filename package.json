@@ -31,7 +31,9 @@
 		"better-sqlite3": "^11.7.0",
 		"carta-md": "^4.11.1",
 		"handlebars": "^4.7.8",
+		"mammoth": "^1.11.0",
 		"mastra": "^1.3.1",
+		"pdf-parse-new": "^2.0.0",
 		"sqlite-vec": "^0.1.7-alpha.2",
 		"zod": "^4"
 	},

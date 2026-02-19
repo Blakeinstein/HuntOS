@@ -9,8 +9,10 @@ import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import { writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
+import { TextExtractor } from '$lib/services/services/textExtractor';
 
 const services = createServices(db);
+const textExtractor = new TextExtractor();
 
 const USER_RESOURCES_DIR = resolve('data/user-resources');
 
@@ -57,8 +59,9 @@ export const GET: RequestHandler = async () => {
  *
  * For file uploads:
  *   1. Saves the file to data/user-resources/
- *   2. Ingests it as a document (chunk + embed)
- *   3. Returns the created document metadata
+ *   2. Extracts text using TextExtractor (supports PDF, DOCX, HTML, etc.)
+ *   3. Ingests it as a document (chunk + embed)
+ *   4. Returns the created document metadata
  *
  * For URL submissions:
  *   1. Adds the URL to the profile links list
@@ -91,21 +94,57 @@ async function handleFileUpload(request: Request): Promise<Response> {
 		);
 	}
 
-	const rawText = await file.text();
-	if (!rawText.trim()) {
-		return json({ error: 'File is empty or contains no readable text.' }, { status: 400 });
-	}
-
 	const filename = file.name || 'untitled';
 	const mimeType = file.type || 'text/plain';
 
-	// 1. Save file to data/user-resources/ (deduplicate filename if needed)
+	// 1. Read the file as a Buffer (works for both binary and text files)
+	const arrayBuffer = await file.arrayBuffer();
+	const buffer = Buffer.from(arrayBuffer);
+
+	if (buffer.length === 0) {
+		return json({ error: 'File is empty.' }, { status: 400 });
+	}
+
+	// 2. Save file to data/user-resources/ (deduplicate filename if needed)
 	const savedFilename = deduplicateFilename(filename);
 	const filePath = join(USER_RESOURCES_DIR, savedFilename);
-	const buffer = await file.arrayBuffer();
-	writeFileSync(filePath, Buffer.from(buffer));
+	writeFileSync(filePath, buffer);
 
-	// 2. Ingest as a document (chunk + embed + store vectors)
+	// 3. Extract text using TextExtractor (handles PDF, DOCX, HTML, plain text, etc.)
+	let rawText: string;
+	let extractionMetadata: Record<string, unknown> = {};
+
+	try {
+		const result = await textExtractor.extract(buffer, filename, mimeType);
+		rawText = result.text;
+		extractionMetadata = result.metadata;
+
+		console.log(
+			`[TextExtractor] Extracted text from "${filename}" (format: ${result.metadata.format}): ${rawText.length} chars` +
+				(result.metadata.pageCount ? `, ${result.metadata.pageCount} pages` : '')
+		);
+	} catch (extractionError) {
+		const errMsg =
+			extractionError instanceof Error ? extractionError.message : String(extractionError);
+		console.error(`[TextExtractor] Failed to extract text from "${filename}":`, errMsg);
+
+		// File is saved to disk but we can't extract text — return an error
+		// so the user knows the document wasn't indexed
+		return json(
+			{
+				error: `File saved but text extraction failed: ${errMsg}. The file is stored at ${filePath} but could not be indexed for search.`,
+				savedPath: filePath,
+				filename: savedFilename
+			},
+			{ status: 422 }
+		);
+	}
+
+	if (!rawText.trim()) {
+		return json({ error: 'File contains no extractable text content.' }, { status: 400 });
+	}
+
+	// 4. Ingest as a document (chunk + embed + store vectors)
 	const document = await services.documentService.createDocument({
 		filename: savedFilename,
 		rawText,
@@ -117,7 +156,9 @@ async function handleFileUpload(request: Request): Promise<Response> {
 			type: 'file',
 			document,
 			savedPath: filePath,
-			filename: savedFilename
+			filename: savedFilename,
+			extraction: extractionMetadata,
+			extractedText: rawText
 		},
 		{ status: 201 }
 	);
