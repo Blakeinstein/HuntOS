@@ -3,6 +3,9 @@ import { ApplicationService } from '$lib/services/services/application';
 import { SwimlaneService } from '$lib/services/services/swimlane';
 import { ProfileService } from '$lib/services/services/profile';
 import { ResumeService } from '$lib/services/services/resume';
+import { ResumeGenerationService } from '$lib/services/services/resumeGeneration';
+import { ResumeTemplateService } from '$lib/services/services/resumeTemplate';
+import { ResumeHistoryService } from '$lib/services/services/resumeHistory';
 import { JobBoardService } from '$lib/services/services/jobBoard';
 import { JobBoardScraperService } from '$lib/services/services/jobBoardScraper';
 import { EmailMonitorService } from '$lib/services/services/emailMonitor';
@@ -16,6 +19,9 @@ export interface ServiceContainer {
 	applicationService: ApplicationService;
 	profileService: ProfileService;
 	resumeService: ResumeService;
+	resumeGenerationService: ResumeGenerationService;
+	resumeTemplateService: ResumeTemplateService;
+	resumeHistoryService: ResumeHistoryService;
 	swimlaneService: SwimlaneService;
 	jobBoardService: JobBoardService;
 	jobBoardScraperService: JobBoardScraperService | null;
@@ -35,6 +41,12 @@ export interface ServiceContainer {
 export function createServices(db: Database): ServiceContainer {
 	const profileService = new ProfileService(db);
 	const resumeService = new ResumeService(db, profileService);
+	const resumeTemplateService = new ResumeTemplateService(db);
+	const resumeGenerationService = new ResumeGenerationService(
+		profileService,
+		resumeTemplateService
+	);
+	const resumeHistoryService = new ResumeHistoryService(db);
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
 	const documentService = new DocumentService(db, auditLogService);
@@ -43,6 +55,9 @@ export function createServices(db: Database): ServiceContainer {
 		applicationService: new ApplicationService(db),
 		profileService,
 		resumeService,
+		resumeGenerationService,
+		resumeTemplateService,
+		resumeHistoryService,
 		swimlaneService: new SwimlaneService(db),
 		jobBoardService,
 		jobBoardScraperService: null,

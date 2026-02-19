@@ -10,7 +10,8 @@
 		ScrollTextIcon,
 		BriefcaseIcon,
 		PanelLeftCloseIcon,
-		PanelLeftOpenIcon
+		PanelLeftOpenIcon,
+		FileTextIcon
 	} from '@lucide/svelte';
 
 	let { children } = $props();
@@ -20,6 +21,7 @@
 	const navLinks = [
 		{ label: 'Roadmap', href: '/applications', icon: KanbanIcon },
 		{ label: 'Profiles', href: '/profiles', icon: UserIcon },
+		{ label: 'Resume', href: '/resume', icon: FileTextIcon },
 		{ label: 'Audit Log', href: '/audit', icon: ScrollTextIcon },
 		{ label: 'Settings', href: '/settings', icon: SettingsIcon }
 	];

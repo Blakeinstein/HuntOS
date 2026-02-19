@@ -7,7 +7,7 @@ import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import type { AuditLogCategory, AuditLogStatus } from '$lib/services/services/auditLog';
 
-const VALID_CATEGORIES: AuditLogCategory[] = ['scrape', 'browser', 'resume', 'agent'];
+const VALID_CATEGORIES: AuditLogCategory[] = ['scrape', 'browser', 'resume', 'agent', 'profile'];
 const VALID_STATUSES: AuditLogStatus[] = ['info', 'success', 'warning', 'error'];
 
 export const GET: RequestHandler = async ({ url }) => {

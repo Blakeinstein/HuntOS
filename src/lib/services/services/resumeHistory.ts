@@ -1,0 +1,358 @@
+import type { Database } from './database';
+import type { ResumeData } from '../resume/schema';
+import fs from 'fs';
+import path from 'path';
+
+// ── Types ────────────────────────────────────────────────────────
+
+/**
+ * A resume history entry as stored in the database.
+ */
+export interface ResumeHistoryEntry {
+	id: number;
+	/** Human-readable name for this resume (derived from job title / company) */
+	name: string;
+	/** The job description that was used to generate this resume */
+	job_description: string;
+	/** Template ID used for generation */
+	template_id: number | null;
+	/** Template name at time of generation */
+	template_name: string;
+	/** Model used for generation */
+	model: string;
+	/** The structured JSON data returned by the LLM */
+	data: ResumeData | null;
+	/** Relative path to the saved markdown file in data/resumes/ */
+	file_path: string;
+	/** Whether the file exists on disk */
+	file_exists: boolean;
+	/** Generation duration in milliseconds */
+	duration_ms: number | null;
+	created_at: string;
+}
+
+/**
+ * Raw SQLite row shape (JSON fields stored as strings).
+ */
+interface ResumeHistoryRow {
+	id: number;
+	name: string;
+	job_description: string;
+	template_id: number | null;
+	template_name: string;
+	model: string;
+	data: string | null;
+	file_path: string;
+	duration_ms: number | null;
+	created_at: string;
+}
+
+/**
+ * Options for creating a new resume history entry.
+ */
+export interface CreateResumeHistoryOptions {
+	name: string;
+	jobDescription: string;
+	templateId?: number | null;
+	templateName: string;
+	model: string;
+	data: ResumeData;
+	markdown: string;
+	durationMs?: number | null;
+}
+
+/**
+ * Filters for querying resume history.
+ */
+export interface ResumeHistoryFilters {
+	/** Free-text search across name and job_description. */
+	search?: string;
+	/** Maximum number of rows to return (default 50). */
+	limit?: number;
+	/** Offset for pagination (default 0). */
+	offset?: number;
+}
+
+/**
+ * Paginated result envelope.
+ */
+export interface ResumeHistoryPage {
+	entries: ResumeHistoryEntry[];
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+// ── Service ──────────────────────────────────────────────────────
+
+/**
+ * Manages the history of generated resumes. Each generation is persisted
+ * as a row in the `resume_history` table with the structured data and
+ * generation parameters, plus a Markdown file saved to `data/resumes/`.
+ *
+ * Supports listing, fetching, deleting individual entries, and purging all.
+ */
+export class ResumeHistoryService {
+	private db: Database;
+	private resumesDir: string;
+
+	constructor(db: Database, resumesDir?: string) {
+		this.db = db;
+		this.resumesDir = resumesDir || path.join(process.cwd(), 'data', 'resumes');
+		this.ensureTable();
+		this.ensureDirectory();
+	}
+
+	// ── Schema ────────────────────────────────────────────────────
+
+	private ensureTable(): void {
+		this.db.raw.exec(`
+			CREATE TABLE IF NOT EXISTS resume_history (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				job_description TEXT NOT NULL,
+				template_id INTEGER,
+				template_name TEXT NOT NULL,
+				model TEXT NOT NULL DEFAULT '',
+				data TEXT,
+				file_path TEXT NOT NULL,
+				duration_ms INTEGER,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_resume_history_created_at ON resume_history(created_at);
+			CREATE INDEX IF NOT EXISTS idx_resume_history_name ON resume_history(name);
+		`);
+	}
+
+	private ensureDirectory(): void {
+		if (!fs.existsSync(this.resumesDir)) {
+			fs.mkdirSync(this.resumesDir, { recursive: true });
+		}
+	}
+
+	// ── Write ────────────────────────────────────────────────────
+
+	/**
+	 * Save a newly generated resume to history.
+	 *
+	 * - Writes the Markdown file to `data/resumes/<sanitised-name>-<timestamp>.md`
+	 * - Inserts a row into `resume_history` with all generation parameters
+	 *
+	 * @returns The created history entry (with `file_exists` populated).
+	 */
+	create(opts: CreateResumeHistoryOptions): ResumeHistoryEntry {
+		const timestamp = Date.now();
+		const safeName = this.sanitiseFilename(opts.name);
+		const filename = `${safeName}-${timestamp}.md`;
+		const filePath = path.join(this.resumesDir, filename);
+		const relativePath = `data/resumes/${filename}`;
+
+		// Write the markdown file to disk
+		fs.writeFileSync(filePath, opts.markdown, 'utf8');
+
+		const result = this.db.run(
+			`INSERT INTO resume_history
+				(name, job_description, template_id, template_name, model, data, file_path, duration_ms, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+			[
+				opts.name,
+				opts.jobDescription,
+				opts.templateId ?? null,
+				opts.templateName,
+				opts.model,
+				JSON.stringify(opts.data),
+				relativePath,
+				opts.durationMs ?? null
+			]
+		);
+
+		const id = Number(result.lastInsertRowid);
+		return this.getById(id)!;
+	}
+
+	// ── Read ─────────────────────────────────────────────────────
+
+	/**
+	 * Query resume history with optional filters and pagination.
+	 * Results are returned newest-first.
+	 */
+	query(filters: ResumeHistoryFilters = {}): ResumeHistoryPage {
+		const limit = filters.limit ?? 50;
+		const offset = filters.offset ?? 0;
+
+		const conditions: string[] = [];
+		const params: unknown[] = [];
+
+		if (filters.search) {
+			conditions.push('(name LIKE ? OR job_description LIKE ?)');
+			const term = `%${filters.search}%`;
+			params.push(term, term);
+		}
+
+		const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+		const countRow = this.db.get<{ count: number }>(
+			`SELECT COUNT(*) as count FROM resume_history ${where}`,
+			params as any[]
+		);
+		const total = countRow?.count ?? 0;
+
+		const rows = this.db.all<ResumeHistoryRow>(
+			`SELECT * FROM resume_history ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+			[...params, limit, offset] as any[]
+		);
+
+		return {
+			entries: rows.map((row) => this.hydrate(row)),
+			total,
+			limit,
+			offset
+		};
+	}
+
+	/**
+	 * Get a single history entry by ID.
+	 */
+	getById(id: number): ResumeHistoryEntry | null {
+		const row = this.db.get<ResumeHistoryRow>(
+			'SELECT * FROM resume_history WHERE id = ?',
+			[id]
+		);
+		return row ? this.hydrate(row) : null;
+	}
+
+	/**
+	 * Read the Markdown content of a saved resume from disk.
+	 *
+	 * @returns The file content, or `null` if the file is missing.
+	 */
+	readMarkdown(id: number): { content: string; entry: ResumeHistoryEntry } | null {
+		const entry = this.getById(id);
+		if (!entry) return null;
+
+		const absolutePath = path.join(process.cwd(), entry.file_path);
+		if (!fs.existsSync(absolutePath)) {
+			return null;
+		}
+
+		return {
+			content: fs.readFileSync(absolutePath, 'utf8'),
+			entry
+		};
+	}
+
+	// ── Delete ───────────────────────────────────────────────────
+
+	/**
+	 * Delete a single history entry and its associated file on disk.
+	 *
+	 * @returns `true` if the entry existed and was deleted.
+	 */
+	delete(id: number): boolean {
+		const entry = this.getById(id);
+		if (!entry) return false;
+
+		// Remove the file from disk (if it exists)
+		this.removeFile(entry.file_path);
+
+		this.db.run('DELETE FROM resume_history WHERE id = ?', [id]);
+		return true;
+	}
+
+	/**
+	 * Delete multiple history entries by ID.
+	 *
+	 * @returns Number of entries actually deleted.
+	 */
+	deleteMany(ids: number[]): number {
+		if (ids.length === 0) return 0;
+
+		let deleted = 0;
+		for (const id of ids) {
+			if (this.delete(id)) deleted++;
+		}
+		return deleted;
+	}
+
+	/**
+	 * Purge all resume history entries and remove all files from disk.
+	 *
+	 * @returns Number of entries purged.
+	 */
+	purgeAll(): number {
+		// First, collect all file paths so we can delete them
+		const rows = this.db.all<{ file_path: string }>(
+			'SELECT file_path FROM resume_history'
+		);
+
+		for (const row of rows) {
+			this.removeFile(row.file_path);
+		}
+
+		const result = this.db.run('DELETE FROM resume_history');
+		return result.changes;
+	}
+
+	// ── Helpers ──────────────────────────────────────────────────
+
+	/**
+	 * Remove a file from disk. Silently ignores missing files.
+	 */
+	private removeFile(relativePath: string): void {
+		try {
+			const absolutePath = path.join(process.cwd(), relativePath);
+			if (fs.existsSync(absolutePath)) {
+				fs.unlinkSync(absolutePath);
+			}
+		} catch {
+			// Swallow errors — the file may already be gone
+		}
+	}
+
+	/**
+	 * Sanitise a string for use as a filename.
+	 * Strips non-alphanumeric characters (except hyphens/underscores)
+	 * and truncates to a reasonable length.
+	 */
+	private sanitiseFilename(name: string): string {
+		return name
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]/g, '-')
+			.replace(/-+/g, '-')
+			.replace(/^-|-$/g, '')
+			.slice(0, 80) || 'resume';
+	}
+
+	/**
+	 * Hydrate a raw SQLite row into a typed `ResumeHistoryEntry`,
+	 * checking file existence and parsing the JSON `data` column.
+	 */
+	private hydrate(row: ResumeHistoryRow): ResumeHistoryEntry {
+		let data: ResumeData | null = null;
+		if (row.data) {
+			try {
+				data = JSON.parse(row.data);
+			} catch {
+				data = null;
+			}
+		}
+
+		const absolutePath = path.join(process.cwd(), row.file_path);
+		const fileExists = fs.existsSync(absolutePath);
+
+		return {
+			id: row.id,
+			name: row.name,
+			job_description: row.job_description,
+			template_id: row.template_id,
+			template_name: row.template_name,
+			model: row.model,
+			data,
+			file_path: row.file_path,
+			file_exists: fileExists,
+			duration_ms: row.duration_ms,
+			created_at: row.created_at
+		};
+	}
+}

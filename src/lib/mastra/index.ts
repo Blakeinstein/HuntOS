@@ -7,6 +7,7 @@ import { Observability, DefaultExporter, SamplingStrategyType } from '@mastra/ob
 import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import { createProfileAgent } from './agents/profile-agent';
+import { createResumeAgent } from './agents/resume-agent';
 import {
 	createJobBoardAgent,
 	createJobBoardSubAgentRegistry,
@@ -23,6 +24,14 @@ const profileAgent = createProfileAgent(
 	services.auditLogService,
 	services.documentService
 );
+const resumeAgent = createResumeAgent(
+	services.profileService,
+	services.auditLogService,
+	services.documentService,
+	services.resumeGenerationService,
+	services.resumeTemplateService,
+	services.resumeHistoryService
+);
 const jobBoardAgent = createJobBoardAgent();
 
 // Site-specific sub-agents — each is registered with dot-notation keys
@@ -36,6 +45,7 @@ const subAgentRegistry = createJobBoardSubAgentRegistry();
 export const mastra = new Mastra({
 	agents: {
 		'profile-agent': profileAgent,
+		'resume-agent': resumeAgent,
 		'job-board-agent': jobBoardAgent,
 		'job-board-agent.linkedin': linkedInAgent,
 		'job-board-agent.greenhouse': greenhouseAgent,

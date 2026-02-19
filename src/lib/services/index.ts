@@ -9,6 +9,9 @@ export * from '$lib/services/services/jobBoard';
 export * from '$lib/services/services/jobBoardScraper';
 export * from '$lib/services/services/profile';
 export * from '$lib/services/services/resume';
+export * from '$lib/services/services/resumeGeneration';
+export * from '$lib/services/services/resumeTemplate';
+export * from '$lib/services/services/resumeHistory';
 export * from '$lib/services/services/swimlane';
 export * from '$lib/services/services/auditLog';
 
@@ -38,3 +41,9 @@ export type {
 	AuditLogCategory,
 	AuditLogStatus
 } from '$lib/services/services/auditLog';
+export type {
+	ResumeHistoryEntry,
+	ResumeHistoryPage,
+	ResumeHistoryFilters,
+	CreateResumeHistoryOptions
+} from '$lib/services/services/resumeHistory';
