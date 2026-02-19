@@ -22,6 +22,10 @@ export async function PUT({ request }) {
 		const data = await request.json();
 
 		for (const [key, value] of Object.entries(data)) {
+			if (!services.profileService.isValidProfileKey(key)) {
+				continue;
+			}
+
 			if (typeof value === 'string') {
 				await services.profileService.updateProfile(key as any, value);
 				continue;
@@ -29,6 +33,12 @@ export async function PUT({ request }) {
 
 			if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
 				await services.profileService.updateProfile(key as any, value);
+				continue;
+			}
+
+			// For complex values (arrays of objects, nested structures), serialize to JSON string
+			if (typeof value === 'object' && value !== null) {
+				await services.profileService.updateProfile(key as any, JSON.stringify(value));
 				continue;
 			}
 

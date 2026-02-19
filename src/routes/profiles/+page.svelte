@@ -174,15 +174,24 @@
 	}
 
 	async function saveProfile() {
+		if (Object.keys(formState).length === 0) return;
+
 		isSaving = true;
 		saveSuccess = false;
 
 		try {
-			await fetch('/api/profiles', {
+			const res = await fetch('/api/profiles', {
 				method: 'PUT',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(mergedProfile)
+				body: JSON.stringify(formState)
 			});
+
+			if (!res.ok) {
+				const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+				console.error('Failed to save profile:', err.error ?? err);
+				return;
+			}
+
 			saveSuccess = true;
 			formState = {};
 			await invalidate('db:profile');
