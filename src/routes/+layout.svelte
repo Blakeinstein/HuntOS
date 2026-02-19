@@ -74,7 +74,7 @@
 	<aside
 		class="overflow-y-auto border-r border-surface-200-800 bg-surface-50-950 transition-all duration-200"
 		class:w-48={!sidebarCollapsed}
-		class:w-16={sidebarCollapsed}
+		class:w-24={sidebarCollapsed}
 	>
 		<Navigation
 			layout={sidebarCollapsed ? 'rail' : 'sidebar'}
