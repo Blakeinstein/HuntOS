@@ -6,6 +6,7 @@ import { ResumeService } from '$lib/services/services/resume';
 import { ResumeGenerationService } from '$lib/services/services/resumeGeneration';
 import { ResumeTemplateService } from '$lib/services/services/resumeTemplate';
 import { ResumeHistoryService } from '$lib/services/services/resumeHistory';
+import { PdfService } from '$lib/services/services/pdfService';
 import { JobBoardService } from '$lib/services/services/jobBoard';
 import { JobBoardScraperService } from '$lib/services/services/jobBoardScraper';
 import { EmailMonitorService } from '$lib/services/services/emailMonitor';
@@ -22,6 +23,7 @@ export interface ServiceContainer {
 	resumeGenerationService: ResumeGenerationService;
 	resumeTemplateService: ResumeTemplateService;
 	resumeHistoryService: ResumeHistoryService;
+	pdfService: PdfService;
 	swimlaneService: SwimlaneService;
 	jobBoardService: JobBoardService;
 	jobBoardScraperService: JobBoardScraperService | null;
@@ -46,7 +48,8 @@ export function createServices(db: Database): ServiceContainer {
 		profileService,
 		resumeTemplateService
 	);
-	const resumeHistoryService = new ResumeHistoryService(db);
+	const pdfService = new PdfService();
+	const resumeHistoryService = new ResumeHistoryService(db, undefined, pdfService);
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
 	const documentService = new DocumentService(db, auditLogService);
@@ -58,6 +61,7 @@ export function createServices(db: Database): ServiceContainer {
 		resumeGenerationService,
 		resumeTemplateService,
 		resumeHistoryService,
+		pdfService,
 		swimlaneService: new SwimlaneService(db),
 		jobBoardService,
 		jobBoardScraperService: null,

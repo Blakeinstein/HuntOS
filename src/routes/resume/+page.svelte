@@ -13,11 +13,15 @@
 		Trash2Icon,
 		RotateCcwIcon,
 		XIcon,
-		MessageSquareIcon
+		MessageSquareIcon,
+		HistoryIcon,
+		DownloadIcon
 	} from '@lucide/svelte';
 	import { Tabs } from '@skeletonlabs/skeleton-svelte';
 	import ResumeChat from '$lib/components/ResumeChat.svelte';
 	import TemplateEditorModal from '$lib/components/TemplateEditorModal.svelte';
+	import CartaEditor from '$lib/components/CartaEditor.svelte';
+	import ResumeHistory from '$lib/components/ResumeHistory.svelte';
 
 	let { data } = $props();
 
@@ -25,8 +29,11 @@
 	let jobDescription = $state('');
 	let generatedMarkdown = $state('');
 	let generatedData = $state<Record<string, unknown> | null>(null);
+	let generatedHistoryId = $state<number | null>(null);
+	let pdfAvailable = $state(false);
 	let selectedTemplateId = $state<number | null>(null);
 	let isGenerating = $state(false);
+	let isDownloading = $state(false);
 	let error = $state('');
 	let success = $state(false);
 	let copied = $state(false);
@@ -46,10 +53,12 @@
 	let templateSaving = $state(false);
 
 	const templates = $derived(data.templates ?? []);
+	const history = $derived(data.history ?? { entries: [], total: 0, limit: 20, offset: 0 });
 
-	const effectiveTemplateId = $derived(
-		selectedTemplateId ?? (templates.length > 0 ? templates[0].id : null)
+	const defaultTemplateId = $derived(
+		templates.find((t: { is_default: number }) => t.is_default)?.id ?? templates[0]?.id ?? null
 	);
+	const effectiveTemplateId = $derived(selectedTemplateId ?? defaultTemplateId);
 
 	const canGenerate = $derived(
 		jobDescription.trim().length > 0 && !isGenerating && data.hasProfile
@@ -65,10 +74,13 @@
 		success = false;
 		generatedMarkdown = '';
 		generatedData = null;
+		generatedHistoryId = null;
+		pdfAvailable = false;
 
 		try {
 			const body: Record<string, unknown> = {
-				jobDescription: jobDescription.trim()
+				jobDescription: jobDescription.trim(),
+				generatePdf: true
 			};
 			if (effectiveTemplateId) {
 				body.templateId = effectiveTemplateId;
@@ -88,7 +100,12 @@
 
 			generatedMarkdown = result.markdown ?? '';
 			generatedData = result.data ?? null;
+			generatedHistoryId = result.historyId ?? null;
+			pdfAvailable = result.pdfAvailable ?? false;
 			success = true;
+
+			// Refresh history in the background
+			invalidate('db:resume-history');
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'An unexpected error occurred';
 		} finally {
@@ -104,6 +121,60 @@
 			setTimeout(() => (copied = false), 2000);
 		} catch {
 			// clipboard API not available
+		}
+	}
+
+	async function downloadPdf() {
+		if (!generatedHistoryId) return;
+		isDownloading = true;
+
+		try {
+			const res = await fetch(`/api/resumes/history/${generatedHistoryId}/download?format=pdf`);
+			if (!res.ok) {
+				const text = await res.text();
+				let msg: string;
+				try {
+					msg = JSON.parse(text).message ?? text;
+				} catch {
+					msg = text;
+				}
+				throw new Error(msg || `Download failed (${res.status})`);
+			}
+
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = 'resume.pdf';
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'PDF download failed';
+		} finally {
+			isDownloading = false;
+		}
+	}
+
+	async function downloadMarkdown() {
+		if (!generatedHistoryId) return;
+
+		try {
+			const res = await fetch(`/api/resumes/history/${generatedHistoryId}/download?format=md`);
+			if (!res.ok) throw new Error('Download failed');
+
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = 'resume.md';
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Markdown download failed';
 		}
 	}
 
@@ -213,7 +284,7 @@
 		</div>
 	{/if}
 
-	<!-- Tabs: AI Chat | Generate | Templates -->
+	<!-- Tabs: AI Chat | Quick Generate | History | Templates -->
 	<Tabs value={activeTab} onValueChange={(details) => (activeTab = details.value ?? 'chat')}>
 		<Tabs.List>
 			<Tabs.Trigger value="chat">
@@ -224,12 +295,23 @@
 				<SparklesIcon class="mr-1.5 size-4" />
 				Quick Generate
 			</Tabs.Trigger>
+			<Tabs.Trigger value="history">
+				<HistoryIcon class="mr-1.5 size-4" />
+				History
+				{#if history.total > 0}
+					<span
+						class="ml-1 rounded-full bg-primary-500/20 px-1.5 py-0.5 text-[10px] font-bold text-primary-500"
+					>
+						{history.total}
+					</span>
+				{/if}
+			</Tabs.Trigger>
 			<Tabs.Trigger value="templates">
 				<LayoutTemplateIcon class="mr-1.5 size-4" />
 				Templates
 				{#if templates.length > 0}
 					<span
-						class="ml-1 rounded-full bg-primary-500/20 px-1.5 py-0.5 text-[10px] font-bold text-primary-500"
+						class="ml-1 rounded-full bg-surface-500/20 px-1.5 py-0.5 text-[10px] font-bold opacity-60"
 					>
 						{templates.length}
 					</span>
@@ -245,10 +327,10 @@
 			</div>
 		</Tabs.Content>
 
-		<!-- ═══ Generate Tab ═══ -->
+		<!-- ═══ Quick Generate Tab ═══ -->
 		<Tabs.Content value="generate">
 			<div class="mt-4 grid gap-6 lg:grid-cols-2">
-				<!-- Left: Job Description Input -->
+				<!-- Left: Job Description Input + Options -->
 				<div class="space-y-4 card border border-surface-200-800 bg-surface-50-950 p-5">
 					<h2 class="flex items-center gap-2 text-sm font-bold">
 						<FileTextIcon class="size-4 text-primary-500" />
@@ -256,7 +338,7 @@
 					</h2>
 
 					<textarea
-						class="textarea min-h-75 font-mono text-sm"
+						class="textarea min-h-60 font-mono text-sm"
 						placeholder="Paste the full job description here...
 
 Example:
@@ -265,23 +347,22 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 						disabled={isGenerating}
 					></textarea>
 
-					<!-- Template picker -->
-					{#if templates.length > 1}
-						<label class="label">
-							<span class="text-xs font-medium opacity-60">Template</span>
-							<select
-								class="select text-sm"
-								bind:value={selectedTemplateId}
-								disabled={isGenerating}
-							>
-								{#each templates as tpl (tpl.id)}
-									<option value={tpl.id}>
-										{tpl.name}{tpl.is_default ? ' (default)' : ''}
-									</option>
-								{/each}
-							</select>
-						</label>
-					{/if}
+					<!-- Template picker — always visible -->
+					<label class="label">
+						<span class="text-xs font-medium opacity-60">Template</span>
+						<select
+							class="select text-sm"
+							value={effectiveTemplateId}
+							onchange={(e) => (selectedTemplateId = Number(e.currentTarget.value))}
+							disabled={isGenerating}
+						>
+							{#each templates as tpl (tpl.id)}
+								<option value={tpl.id}>
+									{tpl.name}{tpl.is_default ? ' (default)' : ''}
+								</option>
+							{/each}
+						</select>
+					</label>
 
 					<div class="flex items-center justify-between">
 						<span class="text-xs opacity-50">
@@ -317,7 +398,10 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 				</div>
 
 				<!-- Right: Generated Resume Preview -->
-				<div class="space-y-4 card border border-surface-200-800 bg-surface-50-950 p-5">
+				<div
+					class="flex flex-col space-y-4 card border border-surface-200-800 bg-surface-50-950 p-5"
+				>
+					<!-- Header with actions -->
 					<div class="flex items-center justify-between">
 						<h2 class="flex items-center gap-2 text-sm font-bold">
 							<SparklesIcon class="size-4 text-primary-500" />
@@ -325,18 +409,55 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 						</h2>
 
 						{#if generatedMarkdown}
-							<button type="button" class="btn gap-1.5 preset-tonal btn-sm" onclick={copyMarkdown}>
-								{#if copied}
-									<CheckCircleIcon class="size-3.5" />
-									<span>Copied!</span>
-								{:else}
-									<CopyIcon class="size-3.5" />
-									<span>Copy</span>
+							<div class="flex items-center gap-1.5">
+								<!-- Copy markdown -->
+								<button
+									type="button"
+									class="btn gap-1.5 preset-tonal btn-sm"
+									onclick={copyMarkdown}
+								>
+									{#if copied}
+										<CheckCircleIcon class="size-3.5" />
+										<span>Copied!</span>
+									{:else}
+										<CopyIcon class="size-3.5" />
+										<span>Copy</span>
+									{/if}
+								</button>
+
+								<!-- Download markdown -->
+								{#if generatedHistoryId}
+									<button
+										type="button"
+										class="btn gap-1.5 preset-tonal btn-sm"
+										onclick={downloadMarkdown}
+									>
+										<DownloadIcon class="size-3.5" />
+										<span>MD</span>
+									</button>
 								{/if}
-							</button>
+
+								<!-- Download PDF -->
+								{#if generatedHistoryId}
+									<button
+										type="button"
+										class="btn gap-1.5 preset-filled-primary-500 btn-sm"
+										disabled={isDownloading}
+										onclick={downloadPdf}
+									>
+										{#if isDownloading}
+											<LoaderCircleIcon class="size-3.5 animate-spin" />
+										{:else}
+											<DownloadIcon class="size-3.5" />
+										{/if}
+										<span>PDF</span>
+									</button>
+								{/if}
+							</div>
 						{/if}
 					</div>
 
+					<!-- Content area -->
 					{#if isGenerating}
 						<div class="flex flex-col items-center justify-center gap-3 py-16 opacity-60">
 							<LoaderCircleIcon class="size-8 animate-spin text-primary-500" />
@@ -344,19 +465,30 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 							<p class="text-xs opacity-50">This may take a minute or two depending on the LLM.</p>
 						</div>
 					{:else if generatedMarkdown}
+						<!-- Carta markdown editor/preview -->
 						<div
-							class="max-h-125 overflow-y-auto rounded border border-surface-200-800 bg-surface-100-900 p-4"
+							class="min-h-0 flex-1 overflow-hidden rounded border border-surface-200-800"
+							style="min-height: 32rem;"
 						>
-							<pre
-								class="font-mono text-xs leading-relaxed whitespace-pre-wrap">{generatedMarkdown}</pre>
+							<CartaEditor
+								value={generatedMarkdown}
+								initialTab="preview"
+								disableToolbar
+								class="h-full"
+							/>
 						</div>
 
 						{#if success && generatedData}
-							<p class="flex items-center gap-1.5 text-xs text-success-500">
-								<CheckCircleIcon class="size-3.5" />
-								Resume generated successfully — {(generatedData.skills as string[])?.length ?? 0} skills,
-								{(generatedData.experience as unknown[])?.length ?? 0} experience entries
-							</p>
+							<div class="flex items-center gap-3">
+								<p class="flex items-center gap-1.5 text-xs text-success-500">
+									<CheckCircleIcon class="size-3.5" />
+									Resume generated — {(generatedData.skills as string[])?.length ?? 0} skills,
+									{(generatedData.experience as unknown[])?.length ?? 0} experience entries
+								</p>
+								{#if pdfAvailable}
+									<span class="badge preset-filled-primary-500 text-[10px]">PDF ready</span>
+								{/if}
+							</div>
 						{/if}
 					{:else}
 						<div class="flex flex-col items-center justify-center gap-2 py-16 opacity-40">
@@ -366,6 +498,13 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 						</div>
 					{/if}
 				</div>
+			</div>
+		</Tabs.Content>
+
+		<!-- ═══ History Tab ═══ -->
+		<Tabs.Content value="history">
+			<div class="mt-4">
+				<ResumeHistory {history} />
 			</div>
 		</Tabs.Content>
 

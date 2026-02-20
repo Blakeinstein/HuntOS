@@ -13,7 +13,7 @@ export async function POST({ request }) {
 	});
 
 	try {
-		const { jobDescription, templateId, resumeName } = await request.json();
+		const { jobDescription, templateId, resumeName, generatePdf = true } = await request.json();
 
 		if (
 			!jobDescription ||
@@ -36,7 +36,7 @@ export async function POST({ request }) {
 		// Derive a name if none was provided
 		const name = resumeName || deriveResumeName(result.data?.name || 'Resume', jobDescription);
 
-		// Save to history
+		// Save to history (markdown file)
 		const historyEntry = services.resumeHistoryService.create({
 			name,
 			jobDescription,
@@ -47,15 +47,38 @@ export async function POST({ request }) {
 			markdown: result.markdown
 		});
 
+		// Generate PDF alongside the markdown if requested
+		let pdfAvailable = false;
+		let pdfPath: string | null = null;
+
+		if (generatePdf) {
+			try {
+				const pdfResult = await services.resumeHistoryService.generatePdf(historyEntry.id);
+				if (pdfResult) {
+					pdfAvailable = true;
+					pdfPath = pdfResult.entry.pdf_path;
+				}
+			} catch (pdfError) {
+				// PDF generation is non-critical — log and continue
+				console.warn(
+					'[api/resumes/generate] PDF generation failed (non-critical):',
+					pdfError instanceof Error ? pdfError.message : pdfError
+				);
+			}
+		}
+
 		finishAudit({
 			status: 'success',
 			detail:
 				`Resume "${name}" generated successfully using "${result.templateName}" template. ` +
 				`Skills: ${result.data.skills.length}, Experience: ${result.data.experience.length}, ` +
-				`Education: ${result.data.education.length}. Saved as history #${historyEntry.id}.`,
+				`Education: ${result.data.education.length}. Saved as history #${historyEntry.id}.` +
+				(pdfAvailable ? ' PDF generated.' : ''),
 			meta: {
 				historyId: historyEntry.id,
 				filePath: historyEntry.file_path,
+				pdfPath,
+				pdfAvailable,
 				resumeName: name,
 				templateName: result.templateName,
 				skillCount: result.data.skills.length,
@@ -71,7 +94,9 @@ export async function POST({ request }) {
 			...result,
 			historyId: historyEntry.id,
 			resumeName: name,
-			filePath: historyEntry.file_path
+			filePath: historyEntry.file_path,
+			pdfAvailable,
+			pdfPath
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to generate resume';

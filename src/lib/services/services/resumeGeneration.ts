@@ -1,10 +1,11 @@
-import { generateObject } from 'ai';
+import { generateObject, generateText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import Handlebars from 'handlebars';
 import { OPENROUTER_API_KEY } from '$env/static/private';
 import type { ProfileService, ProfileData } from './profile';
 import type { ResumeTemplateService, ResumeTemplate } from './resumeTemplate';
 import { resumeDataSchema, type ResumeData } from '../resume/schema';
+import untruncateJson from 'untruncate-json';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +20,8 @@ export interface ResumeGenerationConfig {
 	model: string;
 	/** Request timeout in milliseconds (default: 120 000 — 2 minutes) */
 	timeoutMs: number;
+	/** Maximum output tokens for the LLM (default: 16384) */
+	maxOutputTokens: number;
 }
 
 export interface ResumeGenerationResult {
@@ -32,7 +35,8 @@ export interface ResumeGenerationResult {
 
 const DEFAULT_CONFIG: ResumeGenerationConfig = {
 	model: 'qwen/qwen3-30b-a3b-instruct-2507',
-	timeoutMs: 120_000
+	timeoutMs: 120_000,
+	maxOutputTokens: 16_384
 };
 
 // ── Service ──────────────────────────────────────────────────────
@@ -102,18 +106,242 @@ export class ResumeGenerationService {
 	// ── LLM ──────────────────────────────────────────────────────
 
 	/**
-	 * Calls the LLM via AI SDK's `generateObject` with a Zod schema,
-	 * so the response is always well-typed and validated.
+	 * Calls the LLM to produce structured resume JSON.
+	 *
+	 * Strategy (layered, most robust → most lenient):
+	 *
+	 * 1. **`generateObject`** with the Zod schema (structured output / `json_schema`
+	 *    response format). The provider sends the schema natively so the model is
+	 *    constrained. Uses `experimental_repairText` with `untruncate-json` so
+	 *    that output truncated by token limits is automatically completed before
+	 *    validation.
+	 *
+	 * 2. **`generateText` fallback** — strips `<think>` tags and code fences,
+	 *    applies `untruncate-json`, and validates with Zod manually.
+	 *
+	 * Both paths set an explicit `maxOutputTokens` (default 16 384) to avoid
+	 * silent truncation by the provider's default completion limit.
 	 */
 	private async callLLM(prompt: string): Promise<ResumeData> {
-		const { object } = await generateObject({
-			model: this.openrouter(this.config.model),
-			schema: resumeDataSchema,
-			prompt,
-			abortSignal: AbortSignal.timeout(this.config.timeoutMs)
+		const baseModel = this.openrouter(this.config.model);
+
+		// Wrap with reasoning-extraction middleware so `<think>` blocks from
+		// thinking models (Qwen3, DeepSeek R1, etc.) are stripped before the
+		// output parser sees the text.
+		const model = wrapLanguageModel({
+			model: baseModel,
+			middleware: [extractReasoningMiddleware({ tagName: 'think' })]
 		});
 
-		return object;
+		const sharedSettings = {
+			maxOutputTokens: this.config.maxOutputTokens,
+			abortSignal: AbortSignal.timeout(this.config.timeoutMs)
+		};
+
+		// ── Primary: generateObject (native structured output) ────
+		try {
+			const result = await generateObject({
+				model,
+				schema: resumeDataSchema,
+				schemaName: 'Resume',
+				schemaDescription:
+					'ATS-friendly resume with professional profile, skills, experience, education, certifications, projects, and additional info.',
+				prompt,
+				...sharedSettings,
+
+				// Repair truncated / malformed JSON before validation.
+				// Called automatically when the raw text fails to parse or
+				// doesn't match the schema.
+				experimental_repairText: async ({ text }) => {
+					console.warn(
+						'[ResumeGeneration] repairText invoked. finishReason may be "length" (truncation). Attempting repair…',
+						'text length:',
+						text.length
+					);
+					return this.repairJson(text);
+				}
+			});
+
+			if (result.finishReason === 'length') {
+				console.warn(
+					'[ResumeGeneration] generateObject finished with reason "length" — output may have been truncated.',
+					'Tokens used:',
+					result.usage
+				);
+			}
+
+			return result.object;
+		} catch (primaryError) {
+			console.warn(
+				'[ResumeGeneration] generateObject failed, falling back to generateText:',
+				primaryError instanceof Error ? primaryError.message : primaryError
+			);
+		}
+
+		// ── Fallback: generateText → extract + repair + validate ──
+		const { text, finishReason, usage } = await generateText({
+			model,
+			prompt,
+			...sharedSettings
+		});
+
+		if (finishReason === 'length') {
+			console.warn(
+				'[ResumeGeneration] Fallback generateText finished with reason "length" — output truncated.',
+				'Tokens used:',
+				usage
+			);
+		}
+
+		// Try to extract and repair JSON from the raw text
+		const json = this.extractAndRepairJson(text);
+		if (!json) {
+			console.error(
+				'[ResumeGeneration] Could not extract JSON from LLM response.',
+				`finishReason=${finishReason}`,
+				'Raw text (first 2000 chars):',
+				text.slice(0, 2000)
+			);
+			throw new Error(
+				`Resume generation failed: the model did not return valid JSON (finishReason=${finishReason}). ` +
+					'Try again or switch to a different model.'
+			);
+		}
+
+		const result = resumeDataSchema.safeParse(json);
+		if (!result.success) {
+			console.error(
+				'[ResumeGeneration] Extracted JSON did not match schema.',
+				`finishReason=${finishReason}`,
+				'Validation errors:',
+				JSON.stringify(result.error.issues ?? result.error, null, 2)
+			);
+			console.error(
+				'[ResumeGeneration] Extracted JSON (first 2000 chars):',
+				JSON.stringify(json).slice(0, 2000)
+			);
+			throw new Error(
+				`Resume generation failed: the model returned JSON that did not match the expected schema (finishReason=${finishReason}). ` +
+					'Try again or switch to a different model.'
+			);
+		}
+
+		return result.data;
+	}
+
+	// ── JSON repair helpers ──────────────────────────────────────
+
+	/**
+	 * Attempt to repair a raw text string that should be JSON.
+	 * Used by `experimental_repairText` in `generateObject`.
+	 *
+	 * 1. Strips `<think>` blocks, code fences, and surrounding prose.
+	 * 2. Applies `untruncate-json` to close any truncated structures.
+	 * 3. Returns the repaired string, or `null` if unrecoverable.
+	 */
+	private repairJson(raw: string): string | null {
+		let text = this.stripWrappers(raw);
+
+		// Try parsing as-is first
+		try {
+			JSON.parse(text);
+			return text;
+		} catch {
+			// needs repair
+		}
+
+		// Apply untruncate-json to close truncated JSON structures
+		try {
+			const repaired = untruncateJson(text);
+			JSON.parse(repaired); // verify it's now valid
+			console.info(
+				'[ResumeGeneration] untruncate-json successfully repaired truncated output.',
+				`Original length: ${text.length}, repaired length: ${repaired.length}`
+			);
+			return repaired;
+		} catch {
+			// untruncate couldn't fix it
+		}
+
+		// Try extracting just the { … } portion and repairing that
+		const braceMatch = text.match(/\{[\s\S]*/);
+		if (braceMatch) {
+			try {
+				const repaired = untruncateJson(braceMatch[0]);
+				JSON.parse(repaired);
+				console.info('[ResumeGeneration] untruncate-json repaired brace-extracted JSON.');
+				return repaired;
+			} catch {
+				// still broken
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Full extraction + repair pipeline for the fallback path.
+	 * Returns parsed JSON or `null`.
+	 */
+	private extractAndRepairJson(raw: string): unknown | null {
+		let text = this.stripWrappers(raw);
+
+		// 1. Try parsing directly
+		try {
+			return JSON.parse(text);
+		} catch {
+			// needs work
+		}
+
+		// 2. Try untruncate-json on the full text
+		try {
+			const repaired = untruncateJson(text);
+			return JSON.parse(repaired);
+		} catch {
+			// continue
+		}
+
+		// 3. Extract the first { … } block (greedy) and try
+		const braceMatch = text.match(/\{[\s\S]*\}/);
+		if (braceMatch) {
+			try {
+				return JSON.parse(braceMatch[0]);
+			} catch {
+				// ignore
+			}
+		}
+
+		// 4. Extract from first { to end (for truncated output) and repair
+		const braceStart = text.match(/\{[\s\S]*/);
+		if (braceStart) {
+			try {
+				const repaired = untruncateJson(braceStart[0]);
+				return JSON.parse(repaired);
+			} catch {
+				// truly unrecoverable
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Strip common LLM output wrappers:
+	 * - `<think>…</think>` blocks from thinking models
+	 * - Markdown fenced code blocks (```json … ```)
+	 * - Leading/trailing whitespace
+	 */
+	private stripWrappers(raw: string): string {
+		// Remove <think>…</think> blocks
+		let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+		// Extract content from fenced code blocks
+		const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+		if (fenced) {
+			text = fenced[1].trim();
+		}
+
+		return text;
 	}
 
 	// ── Prompt ────────────────────────────────────────────────────

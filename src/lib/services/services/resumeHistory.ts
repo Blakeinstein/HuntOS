@@ -1,5 +1,6 @@
 import type { Database } from './database';
 import type { ResumeData } from '../resume/schema';
+import type { PdfService, PdfConversionOptions } from './pdfService';
 import fs from 'fs';
 import path from 'path';
 
@@ -24,8 +25,12 @@ export interface ResumeHistoryEntry {
 	data: ResumeData | null;
 	/** Relative path to the saved markdown file in data/resumes/ */
 	file_path: string;
-	/** Whether the file exists on disk */
+	/** Relative path to the saved PDF file in data/resumes/ (null if not yet generated) */
+	pdf_path: string | null;
+	/** Whether the markdown file exists on disk */
 	file_exists: boolean;
+	/** Whether the PDF file exists on disk */
+	pdf_exists: boolean;
 	/** Generation duration in milliseconds */
 	duration_ms: number | null;
 	created_at: string;
@@ -43,6 +48,7 @@ interface ResumeHistoryRow {
 	model: string;
 	data: string | null;
 	file_path: string;
+	pdf_path: string | null;
 	duration_ms: number | null;
 	created_at: string;
 }
@@ -95,10 +101,12 @@ export interface ResumeHistoryPage {
 export class ResumeHistoryService {
 	private db: Database;
 	private resumesDir: string;
+	private pdfService: PdfService | null;
 
-	constructor(db: Database, resumesDir?: string) {
+	constructor(db: Database, resumesDir?: string, pdfService?: PdfService) {
 		this.db = db;
 		this.resumesDir = resumesDir || path.join(process.cwd(), 'data', 'resumes');
+		this.pdfService = pdfService ?? null;
 		this.ensureTable();
 		this.ensureDirectory();
 	}
@@ -116,6 +124,7 @@ export class ResumeHistoryService {
 				model TEXT NOT NULL DEFAULT '',
 				data TEXT,
 				file_path TEXT NOT NULL,
+				pdf_path TEXT,
 				duration_ms INTEGER,
 				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 			);
@@ -123,6 +132,13 @@ export class ResumeHistoryService {
 			CREATE INDEX IF NOT EXISTS idx_resume_history_created_at ON resume_history(created_at);
 			CREATE INDEX IF NOT EXISTS idx_resume_history_name ON resume_history(name);
 		`);
+
+		// Migration: add pdf_path column if missing (existing databases)
+		try {
+			this.db.raw.exec(`ALTER TABLE resume_history ADD COLUMN pdf_path TEXT`);
+		} catch {
+			// Column already exists — ignore
+		}
 	}
 
 	private ensureDirectory(): void {
@@ -153,8 +169,8 @@ export class ResumeHistoryService {
 
 		const result = this.db.run(
 			`INSERT INTO resume_history
-				(name, job_description, template_id, template_name, model, data, file_path, duration_ms, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+				(name, job_description, template_id, template_name, model, data, file_path, pdf_path, duration_ms, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 			[
 				opts.name,
 				opts.jobDescription,
@@ -163,6 +179,7 @@ export class ResumeHistoryService {
 				opts.model,
 				JSON.stringify(opts.data),
 				relativePath,
+				null, // pdf_path — generated on demand via generatePdf()
 				opts.durationMs ?? null
 			]
 		);
@@ -215,10 +232,7 @@ export class ResumeHistoryService {
 	 * Get a single history entry by ID.
 	 */
 	getById(id: number): ResumeHistoryEntry | null {
-		const row = this.db.get<ResumeHistoryRow>(
-			'SELECT * FROM resume_history WHERE id = ?',
-			[id]
-		);
+		const row = this.db.get<ResumeHistoryRow>('SELECT * FROM resume_history WHERE id = ?', [id]);
 		return row ? this.hydrate(row) : null;
 	}
 
@@ -245,7 +259,64 @@ export class ResumeHistoryService {
 	// ── Delete ───────────────────────────────────────────────────
 
 	/**
-	 * Delete a single history entry and its associated file on disk.
+	 * Generate (or regenerate) a PDF for the given history entry.
+	 *
+	 * Reads the saved Markdown from disk, converts it to PDF via the
+	 * PdfService, saves the PDF alongside the Markdown, and updates
+	 * the database row with the `pdf_path`.
+	 *
+	 * @returns The updated entry (with `pdf_path` and `pdf_exists` populated),
+	 *          or `null` if the entry/markdown file is missing.
+	 */
+	async generatePdf(
+		id: number,
+		pdfOptions?: PdfConversionOptions
+	): Promise<{ entry: ResumeHistoryEntry; pdfBuffer: Buffer } | null> {
+		if (!this.pdfService) {
+			throw new Error('PdfService is not configured — cannot generate PDF');
+		}
+
+		const mdResult = this.readMarkdown(id);
+		if (!mdResult) return null;
+
+		const { buffer } = await this.pdfService.markdownToPdf(mdResult.content, pdfOptions);
+
+		// Derive pdf filename from the existing markdown filename
+		const mdFilename = path.basename(mdResult.entry.file_path, '.md');
+		const pdfFilename = `${mdFilename}.pdf`;
+		const pdfAbsolute = path.join(this.resumesDir, pdfFilename);
+		const pdfRelative = `data/resumes/${pdfFilename}`;
+
+		fs.writeFileSync(pdfAbsolute, buffer);
+
+		this.db.run('UPDATE resume_history SET pdf_path = ? WHERE id = ?', [pdfRelative, id]);
+
+		return {
+			entry: this.getById(id)!,
+			pdfBuffer: buffer
+		};
+	}
+
+	/**
+	 * Read the PDF file for a history entry from disk.
+	 *
+	 * @returns The PDF buffer and entry, or `null` if missing.
+	 */
+	readPdf(id: number): { buffer: Buffer; entry: ResumeHistoryEntry } | null {
+		const entry = this.getById(id);
+		if (!entry?.pdf_path) return null;
+
+		const absolutePath = path.join(process.cwd(), entry.pdf_path);
+		if (!fs.existsSync(absolutePath)) return null;
+
+		return {
+			buffer: fs.readFileSync(absolutePath),
+			entry
+		};
+	}
+
+	/**
+	 * Delete a single history entry and its associated files on disk.
 	 *
 	 * @returns `true` if the entry existed and was deleted.
 	 */
@@ -253,8 +324,11 @@ export class ResumeHistoryService {
 		const entry = this.getById(id);
 		if (!entry) return false;
 
-		// Remove the file from disk (if it exists)
+		// Remove both markdown and PDF files from disk
 		this.removeFile(entry.file_path);
+		if (entry.pdf_path) {
+			this.removeFile(entry.pdf_path);
+		}
 
 		this.db.run('DELETE FROM resume_history WHERE id = ?', [id]);
 		return true;
@@ -282,12 +356,15 @@ export class ResumeHistoryService {
 	 */
 	purgeAll(): number {
 		// First, collect all file paths so we can delete them
-		const rows = this.db.all<{ file_path: string }>(
-			'SELECT file_path FROM resume_history'
+		const rows = this.db.all<{ file_path: string; pdf_path: string | null }>(
+			'SELECT file_path, pdf_path FROM resume_history'
 		);
 
 		for (const row of rows) {
 			this.removeFile(row.file_path);
+			if (row.pdf_path) {
+				this.removeFile(row.pdf_path);
+			}
 		}
 
 		const result = this.db.run('DELETE FROM resume_history');
@@ -316,12 +393,14 @@ export class ResumeHistoryService {
 	 * and truncates to a reasonable length.
 	 */
 	private sanitiseFilename(name: string): string {
-		return name
-			.toLowerCase()
-			.replace(/[^a-z0-9_-]/g, '-')
-			.replace(/-+/g, '-')
-			.replace(/^-|-$/g, '')
-			.slice(0, 80) || 'resume';
+		return (
+			name
+				.toLowerCase()
+				.replace(/[^a-z0-9_-]/g, '-')
+				.replace(/-+/g, '-')
+				.replace(/^-|-$/g, '')
+				.slice(0, 80) || 'resume'
+		);
 	}
 
 	/**
@@ -341,6 +420,12 @@ export class ResumeHistoryService {
 		const absolutePath = path.join(process.cwd(), row.file_path);
 		const fileExists = fs.existsSync(absolutePath);
 
+		let pdfExists = false;
+		if (row.pdf_path) {
+			const pdfAbsolute = path.join(process.cwd(), row.pdf_path);
+			pdfExists = fs.existsSync(pdfAbsolute);
+		}
+
 		return {
 			id: row.id,
 			name: row.name,
@@ -350,7 +435,9 @@ export class ResumeHistoryService {
 			model: row.model,
 			data,
 			file_path: row.file_path,
+			pdf_path: row.pdf_path,
 			file_exists: fileExists,
+			pdf_exists: pdfExists,
 			duration_ms: row.duration_ms,
 			created_at: row.created_at
 		};

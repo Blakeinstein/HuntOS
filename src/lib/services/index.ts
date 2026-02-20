@@ -12,6 +12,7 @@ export * from '$lib/services/services/resume';
 export * from '$lib/services/services/resumeGeneration';
 export * from '$lib/services/services/resumeTemplate';
 export * from '$lib/services/services/resumeHistory';
+export * from '$lib/services/services/pdfService';
 export * from '$lib/services/services/swimlane';
 export * from '$lib/services/services/auditLog';
 export * from '$lib/services/services/textExtractor';
@@ -49,3 +50,4 @@ export type {
 	CreateResumeHistoryOptions
 } from '$lib/services/services/resumeHistory';
 export type { ExtractionResult, SupportedFormat } from '$lib/services/services/textExtractor';
+export type { PdfConversionOptions, PdfConversionResult } from '$lib/services/services/pdfService';
