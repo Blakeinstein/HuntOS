@@ -391,9 +391,39 @@ export class ResumeGenerationService {
 	/**
 	 * Compiles the Handlebars template and renders the resume data
 	 * into a Markdown string.
+	 *
+	 * Registers custom Handlebars helpers:
+	 * - `hasKeys`: block helper that renders its content only when an object has ≥1 key
+	 * - `join`: inline helper that joins an array with a separator (default ", ")
 	 */
 	private applyTemplate(template: ResumeTemplate, data: ResumeData): string {
-		const compiled = Handlebars.compile(template.content);
+		const hbs = Handlebars.create();
+
+		// Works as a subexpression: {{#if (hasKeys obj)}} → returns boolean
+		// Works as a block helper:  {{#hasKeys obj}}…{{/hasKeys}} → renders content
+		hbs.registerHelper(
+			'hasKeys',
+			function (this: unknown, obj: unknown, options: Handlebars.HelperOptions) {
+				const result = obj && typeof obj === 'object' && Object.keys(obj).length > 0;
+
+				// Subexpression usage — no fn/inverse, just return a boolean for {{#if}}
+				if (typeof options.fn !== 'function') {
+					return !!result;
+				}
+
+				// Block helper usage
+				return result ? options.fn(this) : options.inverse(this);
+			}
+		);
+
+		// {{join array ", "}} — joins array elements with separator
+		hbs.registerHelper('join', function (_arr: unknown, sep: unknown) {
+			const arr = Array.isArray(_arr) ? _arr : [];
+			const separator = typeof sep === 'string' ? sep : ', ';
+			return arr.join(separator);
+		});
+
+		const compiled = hbs.compile(template.content);
 		return compiled(data);
 	}
 
