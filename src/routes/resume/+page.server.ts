@@ -6,9 +6,11 @@ export const load: PageServerLoad = async ({ depends, url }) => {
 	depends('db:profile');
 	depends('db:resume-templates');
 	depends('db:resume-history');
+	depends('db:settings');
 
 	const services = createServices(db);
 
+	const resumeFormat = services.appSettingsService.resumeFormat;
 	const profile = await services.profileService.getProfile();
 	const completeness = await services.profileService.getCompletenessScore();
 	const templates = services.resumeTemplateService.list();
@@ -27,6 +29,7 @@ export const load: PageServerLoad = async ({ depends, url }) => {
 		completeness,
 		profileName: (profile.name as string) ?? '',
 		templates,
-		history
+		history,
+		resumeFormat
 	};
 };

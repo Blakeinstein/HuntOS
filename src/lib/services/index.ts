@@ -13,6 +13,8 @@ export * from '$lib/services/services/resumeGeneration';
 export * from '$lib/services/services/resumeTemplate';
 export * from '$lib/services/services/resumeHistory';
 export * from '$lib/services/services/pdfService';
+export * from '$lib/services/services/typstResume';
+export * from '$lib/services/services/appSettings';
 export * from '$lib/services/services/swimlane';
 export * from '$lib/services/services/auditLog';
 export * from '$lib/services/services/textExtractor';
@@ -51,3 +53,5 @@ export type {
 } from '$lib/services/services/resumeHistory';
 export type { ExtractionResult, SupportedFormat } from '$lib/services/services/textExtractor';
 export type { PdfConversionOptions, PdfConversionResult } from '$lib/services/services/pdfService';
+export type { TypstResumeConfig, TypstResumeResult } from '$lib/services/services/typstResume';
+export type { ResumeFormat, AppSetting, AppSettingsMap } from '$lib/services/services/appSettings';

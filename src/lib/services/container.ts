@@ -7,6 +7,8 @@ import { ResumeGenerationService } from '$lib/services/services/resumeGeneration
 import { ResumeTemplateService } from '$lib/services/services/resumeTemplate';
 import { ResumeHistoryService } from '$lib/services/services/resumeHistory';
 import { PdfService } from '$lib/services/services/pdfService';
+import { TypstResumeService } from '$lib/services/services/typstResume';
+import { AppSettingsService } from '$lib/services/services/appSettings';
 import { JobBoardService } from '$lib/services/services/jobBoard';
 import { JobBoardScraperService } from '$lib/services/services/jobBoardScraper';
 import { EmailMonitorService } from '$lib/services/services/emailMonitor';
@@ -24,6 +26,8 @@ export interface ServiceContainer {
 	resumeTemplateService: ResumeTemplateService;
 	resumeHistoryService: ResumeHistoryService;
 	pdfService: PdfService;
+	typstResumeService: TypstResumeService;
+	appSettingsService: AppSettingsService;
 	swimlaneService: SwimlaneService;
 	jobBoardService: JobBoardService;
 	jobBoardScraperService: JobBoardScraperService | null;
@@ -49,6 +53,8 @@ export function createServices(db: Database): ServiceContainer {
 		resumeTemplateService
 	);
 	const pdfService = new PdfService();
+	const typstResumeService = new TypstResumeService(profileService);
+	const appSettingsService = new AppSettingsService(db);
 	const resumeHistoryService = new ResumeHistoryService(db, undefined, pdfService);
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
@@ -62,6 +68,8 @@ export function createServices(db: Database): ServiceContainer {
 		resumeTemplateService,
 		resumeHistoryService,
 		pdfService,
+		typstResumeService,
+		appSettingsService,
 		swimlaneService: new SwimlaneService(db),
 		jobBoardService,
 		jobBoardScraperService: null,

@@ -5,8 +5,10 @@
 		ChevronRightIcon,
 		SettingsIcon,
 		ShieldIcon,
-		BellIcon
+		BellIcon,
+		FileTextIcon
 	} from '@lucide/svelte';
+	import { resolve } from '$app/paths';
 </script>
 
 <div class="mx-auto max-w-3xl space-y-6">
@@ -22,7 +24,7 @@
 	<div class="grid gap-4 md:grid-cols-2">
 		<!-- Email connections -->
 		<a
-			href="/settings/email"
+			href={resolve('/settings/email')}
 			class="group flex items-start gap-4 card border border-surface-200-800 bg-surface-50-950 p-5 transition-all hover:border-primary-500 hover:shadow-md"
 		>
 			<div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-500/10">
@@ -41,9 +43,30 @@
 			</div>
 		</a>
 
+		<!-- Resume format -->
+		<a
+			href={resolve('/settings/resume')}
+			class="group flex items-start gap-4 card border border-surface-200-800 bg-surface-50-950 p-5 transition-all hover:border-primary-500 hover:shadow-md"
+		>
+			<div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-tertiary-500/10">
+				<FileTextIcon class="size-5 text-tertiary-500" />
+			</div>
+			<div class="min-w-0 flex-1">
+				<div class="flex items-center justify-between">
+					<h2 class="text-sm font-bold">Resume Format</h2>
+					<ChevronRightIcon
+						class="size-4 opacity-30 transition-transform group-hover:translate-x-0.5 group-hover:opacity-60"
+					/>
+				</div>
+				<p class="mt-0.5 text-xs opacity-60">
+					Choose between Markdown + Handlebars templates or Typst (NNJR) for resume generation.
+				</p>
+			</div>
+		</a>
+
 		<!-- Job boards -->
 		<a
-			href="/settings/job-boards"
+			href={resolve('/settings/job-boards')}
 			class="group flex items-start gap-4 card border border-surface-200-800 bg-surface-50-950 p-5 transition-all hover:border-primary-500 hover:shadow-md"
 		>
 			<div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary-500/10">

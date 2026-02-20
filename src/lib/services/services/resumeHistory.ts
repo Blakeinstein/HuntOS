@@ -211,13 +211,13 @@ export class ResumeHistoryService {
 
 		const countRow = this.db.get<{ count: number }>(
 			`SELECT COUNT(*) as count FROM resume_history ${where}`,
-			params as any[]
+			params as unknown[]
 		);
 		const total = countRow?.count ?? 0;
 
 		const rows = this.db.all<ResumeHistoryRow>(
 			`SELECT * FROM resume_history ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-			[...params, limit, offset] as any[]
+			[...params, limit, offset] as unknown[]
 		);
 
 		return {
@@ -295,6 +295,31 @@ export class ResumeHistoryService {
 			entry: this.getById(id)!,
 			pdfBuffer: buffer
 		};
+	}
+
+	/**
+	 * Persist a pre-generated PDF buffer (e.g. from Typst compilation)
+	 * alongside an existing history entry. Unlike `generatePdf` which
+	 * re-renders Markdown → PDF via Playwright, this simply writes the
+	 * provided buffer to disk and updates the database row.
+	 *
+	 * @returns The updated entry with `pdf_path` set, or `null` if the
+	 *          history entry doesn't exist.
+	 */
+	persistTypstPdf(id: number, pdfBuffer: Buffer): ResumeHistoryEntry | null {
+		const entry = this.getById(id);
+		if (!entry) return null;
+
+		const mdFilename = path.basename(entry.file_path, '.md');
+		const pdfFilename = `${mdFilename}.pdf`;
+		const pdfAbsolute = path.join(this.resumesDir, pdfFilename);
+		const pdfRelative = `data/resumes/${pdfFilename}`;
+
+		fs.writeFileSync(pdfAbsolute, pdfBuffer);
+
+		this.db.run('UPDATE resume_history SET pdf_path = ? WHERE id = ?', [pdfRelative, id]);
+
+		return this.getById(id)!;
 	}
 
 	/**

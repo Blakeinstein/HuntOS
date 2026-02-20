@@ -1,0 +1,3 @@
+[submodule "vendor/NNJR"]
+	path = vendor/NNJR
+	url = https://github.com/tzx/NNJR.git

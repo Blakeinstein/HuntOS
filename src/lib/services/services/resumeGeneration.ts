@@ -240,7 +240,7 @@ export class ResumeGenerationService {
 	 * 3. Returns the repaired string, or `null` if unrecoverable.
 	 */
 	private repairJson(raw: string): string | null {
-		let text = this.stripWrappers(raw);
+		const text = this.stripWrappers(raw);
 
 		// Try parsing as-is first
 		try {
@@ -284,7 +284,7 @@ export class ResumeGenerationService {
 	 * Returns parsed JSON or `null`.
 	 */
 	private extractAndRepairJson(raw: string): unknown | null {
-		let text = this.stripWrappers(raw);
+		const text = this.stripWrappers(raw);
 
 		// 1. Try parsing directly
 		try {
