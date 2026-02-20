@@ -68,6 +68,7 @@ h2 {
   border-bottom: 1px solid var(--border);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  break-after: avoid;
 }
 
 h3 {
@@ -76,6 +77,7 @@ h3 {
   color: var(--text-primary);
   margin-top: 8pt;
   margin-bottom: 2pt;
+  break-after: avoid;
 }
 
 p {
@@ -86,12 +88,14 @@ p {
 ul {
   margin: 3pt 0 6pt 16pt;
   padding: 0;
+  break-inside: avoid;
 }
 
 li {
   margin-bottom: 2pt;
   color: var(--text-secondary);
   line-height: 1.45;
+  break-inside: avoid;
 }
 
 li::marker {
@@ -134,6 +138,27 @@ h3 + p {
   font-size: 9.5pt;
   color: var(--text-muted);
 }
+
+/* ── Page-break control ──────────────────────────────────── */
+
+/* A4 page setup */
+@page {
+  size: A4;
+}
+
+/* Keep experience/education/project entry blocks together:
+   heading + location line + achievement list */
+h3 + p + ul {
+  break-before: avoid;
+}
+
+/* Prevent a section header (h2) from sitting alone at the
+   bottom of a page with all its content on the next page */
+h2 + h3,
+h2 + p,
+h2 + ul {
+  break-before: avoid;
+}
 `;
 
 // ── Markdown → HTML conversion ───────────────────────────────────
@@ -153,7 +178,7 @@ function markdownToHtml(md: string): string {
 	let inList = false;
 
 	for (let i = 0; i < lines.length; i++) {
-		let line = lines[i];
+		const line = lines[i];
 
 		// Horizontal rule
 		if (/^[-*_]{3,}\s*$/.test(line)) {
@@ -230,10 +255,7 @@ function inlineFormat(text: string): string {
 			// Inline code
 			.replace(/`(.+?)`/g, '<code>$1</code>')
 			// Links
-			.replace(
-				/\[([^\]]+)\]\(([^)]+)\)/g,
-				'<a href="$2" target="_blank" rel="noopener">$1</a>'
-			)
+			.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
 	);
 }
 
@@ -260,12 +282,7 @@ export class PdfService {
 		markdown: string,
 		options: PdfConversionOptions = {}
 	): Promise<PdfConversionResult> {
-		const {
-			format = 'Letter',
-			margin = '0.6in',
-			pageNumbers = true,
-			customCss = ''
-		} = options;
+		const { format = 'A4', margin = '0.6in', pageNumbers = true, customCss = '' } = options;
 
 		const html = this.buildHtmlDocument(markdown, customCss);
 		const browser = await this.getBrowser();
