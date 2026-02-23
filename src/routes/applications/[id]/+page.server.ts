@@ -22,11 +22,17 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 
 	const latestPipelineRun = pipelineRuns.length > 0 ? pipelineRuns[0] : null;
 
+	// Load step logs for the latest pipeline run (if any)
+	const stepLogs = latestPipelineRun
+		? services.applicationPipelineService.getStepLogs(latestPipelineRun.id)
+		: [];
+
 	return {
 		application,
 		history,
 		pipelineRuns,
 		latestPipelineRun,
+		stepLogs,
 		resources
 	};
 };

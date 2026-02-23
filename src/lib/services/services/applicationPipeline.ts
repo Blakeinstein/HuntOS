@@ -2,7 +2,7 @@ import type { Database } from './database';
 
 // ── Types ───────────────────────────────────────────────────────────
 
-export type PipelineStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type PipelineStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type PipelineStep = 'research' | 'resume' | 'apply';
 
 export const PIPELINE_STEPS: PipelineStep[] = ['research', 'resume', 'apply'];
@@ -25,6 +25,18 @@ export interface PipelineRun {
 	created_at: string;
 }
 
+export interface PipelineStepLog {
+	id: number;
+	pipeline_run_id: number;
+	step: PipelineStep;
+	level: PipelineLogLevel;
+	message: string;
+	meta: Record<string, unknown> | null;
+	created_at: string;
+}
+
+export type PipelineLogLevel = 'info' | 'warn' | 'error' | 'progress';
+
 interface PipelineRunRow {
 	id: number;
 	application_id: number;
@@ -37,20 +49,30 @@ interface PipelineRunRow {
 	created_at: string;
 }
 
+interface PipelineStepLogRow {
+	id: number;
+	pipeline_run_id: number;
+	step: string;
+	level: string;
+	message: string;
+	meta: string | null;
+	created_at: string;
+}
+
 // ── Service ─────────────────────────────────────────────────────────
 
 /**
- * Manages the state of multi-step apply pipeline runs.
+ * Manages the state of multi-step apply pipeline runs and their step logs.
  *
  * Each pipeline run tracks:
  * - Which step is currently executing
  * - Which steps have been completed
- * - Whether the run succeeded or failed
+ * - Whether the run succeeded, failed, or was cancelled
  * - Error messages for failed runs
+ * - Granular progress logs within each step
  *
  * This is a pure state-tracking service — the actual step execution
- * logic lives in the API route handler and the individual services
- * it orchestrates.
+ * logic lives in the ApplyPipelineExecutor.
  */
 export class ApplicationPipelineService {
 	private db: Database;
@@ -63,7 +85,7 @@ export class ApplicationPipelineService {
 
 	/**
 	 * Create a new pipeline run for an application.
-	 * Sets the status to 'pending' — call `startStep()` to begin execution.
+	 * Sets the status to 'running' and begins at the research step.
 	 *
 	 * @returns The created pipeline run.
 	 */
@@ -134,6 +156,110 @@ export class ApplicationPipelineService {
 		);
 	}
 
+	/**
+	 * Cancel a running pipeline. Sets status to 'cancelled'.
+	 * The executor must check isCancelled() to actually stop work.
+	 */
+	cancel(runId: number): boolean {
+		const run = this.getById(runId);
+		if (!run) return false;
+
+		// Only cancel if still running or pending
+		if (run.status !== 'running' && run.status !== 'pending') {
+			return false;
+		}
+
+		this.db.run(
+			`UPDATE application_pipeline_runs
+			 SET status = 'cancelled', error_message = 'Cancelled by user', completed_at = datetime('now')
+			 WHERE id = ?`,
+			[runId]
+		);
+
+		this.addStepLog(runId, run.current_step ?? 'research', 'warn', 'Pipeline cancelled by user');
+
+		return true;
+	}
+
+	/**
+	 * Check if a pipeline run has been cancelled.
+	 * The executor calls this at checkpoints to cooperatively stop.
+	 */
+	isCancelled(runId: number): boolean {
+		const row = this.db.get<{ status: string }>(
+			'SELECT status FROM application_pipeline_runs WHERE id = ?',
+			[runId]
+		);
+		return row?.status === 'cancelled';
+	}
+
+	// ── Step Logs ───────────────────────────────────────────────────
+
+	/**
+	 * Add a progress log entry for a specific step within a pipeline run.
+	 */
+	addStepLog(
+		runId: number,
+		step: PipelineStep,
+		level: PipelineLogLevel,
+		message: string,
+		meta?: Record<string, unknown>
+	): void {
+		this.db.run(
+			`INSERT INTO pipeline_step_logs
+				(pipeline_run_id, step, level, message, meta, created_at)
+			 VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+			[runId, step, level, message, meta ? JSON.stringify(meta) : null]
+		);
+	}
+
+	/**
+	 * Get all step logs for a pipeline run, ordered chronologically.
+	 */
+	getStepLogs(runId: number): PipelineStepLog[] {
+		const rows = this.db.all<PipelineStepLogRow>(
+			`SELECT * FROM pipeline_step_logs
+			 WHERE pipeline_run_id = ?
+			 ORDER BY created_at ASC, id ASC`,
+			[runId]
+		);
+		return rows.map((row) => this.hydrateLog(row));
+	}
+
+	/**
+	 * Get step logs filtered by step name.
+	 */
+	getStepLogsByStep(runId: number, step: PipelineStep): PipelineStepLog[] {
+		const rows = this.db.all<PipelineStepLogRow>(
+			`SELECT * FROM pipeline_step_logs
+			 WHERE pipeline_run_id = ? AND step = ?
+			 ORDER BY created_at ASC, id ASC`,
+			[runId, step]
+		);
+		return rows.map((row) => this.hydrateLog(row));
+	}
+
+	/**
+	 * Get step logs created after a given log ID (for incremental polling).
+	 */
+	getStepLogsSince(runId: number, afterLogId: number): PipelineStepLog[] {
+		const rows = this.db.all<PipelineStepLogRow>(
+			`SELECT * FROM pipeline_step_logs
+			 WHERE pipeline_run_id = ? AND id > ?
+			 ORDER BY created_at ASC, id ASC`,
+			[runId, afterLogId]
+		);
+		return rows.map((row) => this.hydrateLog(row));
+	}
+
+	/**
+	 * Delete all step logs for a pipeline run.
+	 */
+	deleteStepLogs(runId: number): number {
+		const result = this.db.run('DELETE FROM pipeline_step_logs WHERE pipeline_run_id = ?', [runId]);
+		return result.changes;
+	}
+
 	// ── Read ────────────────────────────────────────────────────────
 
 	/**
@@ -180,7 +306,7 @@ export class ApplicationPipelineService {
 	hasActiveRun(applicationId: number): boolean {
 		const row = this.db.get<{ count: number }>(
 			`SELECT COUNT(*) as count FROM application_pipeline_runs
-			 WHERE application_id = ? AND status = 'running'`,
+			 WHERE application_id = ? AND status IN ('running', 'pending')`,
 			[applicationId]
 		);
 		return (row?.count ?? 0) > 0;
@@ -189,21 +315,27 @@ export class ApplicationPipelineService {
 	// ── Delete ──────────────────────────────────────────────────────
 
 	/**
-	 * Delete a pipeline run by ID.
+	 * Delete a pipeline run by ID (also deletes its step logs).
 	 */
 	delete(id: number): boolean {
+		this.deleteStepLogs(id);
 		const result = this.db.run('DELETE FROM application_pipeline_runs WHERE id = ?', [id]);
 		return result.changes > 0;
 	}
 
 	/**
-	 * Delete all pipeline runs for an application.
+	 * Delete all pipeline runs for an application (also deletes step logs).
 	 */
 	deleteByApplicationId(applicationId: number): number {
-		const result = this.db.run(
-			'DELETE FROM application_pipeline_runs WHERE application_id = ?',
-			[applicationId]
-		);
+		// Get all run IDs first to clean up step logs
+		const runs = this.getByApplicationId(applicationId);
+		for (const run of runs) {
+			this.deleteStepLogs(run.id);
+		}
+
+		const result = this.db.run('DELETE FROM application_pipeline_runs WHERE application_id = ?', [
+			applicationId
+		]);
 		return result.changes;
 	}
 
@@ -231,6 +363,30 @@ export class ApplicationPipelineService {
 			error_message: row.error_message,
 			started_at: row.started_at,
 			completed_at: row.completed_at,
+			created_at: row.created_at
+		};
+	}
+
+	/**
+	 * Parse a raw step log row into a typed `PipelineStepLog`.
+	 */
+	private hydrateLog(row: PipelineStepLogRow): PipelineStepLog {
+		let meta: Record<string, unknown> | null = null;
+		if (row.meta) {
+			try {
+				meta = JSON.parse(row.meta);
+			} catch {
+				meta = null;
+			}
+		}
+
+		return {
+			id: row.id,
+			pipeline_run_id: row.pipeline_run_id,
+			step: row.step as PipelineStep,
+			level: row.level as PipelineLogLevel,
+			message: row.message,
+			meta,
 			created_at: row.created_at
 		};
 	}

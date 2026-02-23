@@ -4,7 +4,13 @@ import type { Database } from './database';
  * Supported audit log categories.
  * Expand this union as new execution types are added.
  */
-export type AuditLogCategory = 'scrape' | 'browser' | 'resume' | 'agent' | 'profile';
+export type AuditLogCategory =
+	| 'scrape'
+	| 'browser'
+	| 'resume'
+	| 'agent'
+	| 'profile'
+	| 'application';
 
 /**
  * Severity / outcome status for an audit entry.

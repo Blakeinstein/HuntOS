@@ -37,7 +37,9 @@ export type {
 export type {
 	PipelineRun,
 	PipelineStatus,
-	PipelineStep
+	PipelineStep,
+	PipelineStepLog,
+	PipelineLogLevel
 } from '$lib/services/services/applicationPipeline';
 
 // Re-export runtime constants — these are pure values with no server deps.

@@ -12,9 +12,18 @@
 		AlertTriangleIcon,
 		RefreshCwIcon,
 		ChevronDownIcon,
-		ChevronUpIcon
+		ChevronUpIcon,
+		BanIcon,
+		InfoIcon,
+		AlertCircleIcon,
+		MessageSquareIcon
 	} from '@lucide/svelte';
-	import type { PipelineRun, ApplicationResource, PipelineStep } from '$lib/services/types';
+	import type {
+		PipelineRun,
+		ApplicationResource,
+		PipelineStep,
+		PipelineStepLog
+	} from '$lib/services/types';
 	import { PIPELINE_STEPS, PIPELINE_STEP_LABELS } from '$lib/services/types';
 
 	interface Props {
@@ -23,16 +32,60 @@
 		latestRun: PipelineRun | null;
 		resources: ApplicationResource[];
 		isBacklog: boolean;
+		initialStepLogs?: PipelineStepLog[];
 		onApply?: () => void;
+		onResumeFrom?: (step: PipelineStep) => void;
 	}
 
-	let { applicationId, pipelineRuns, latestRun, resources, isBacklog, onApply }: Props = $props();
+	let {
+		applicationId,
+		pipelineRuns,
+		latestRun,
+		resources,
+		isBacklog,
+		initialStepLogs = [],
+		onApply,
+		onResumeFrom
+	}: Props = $props();
 
-	let isPolling = $state(false);
-	let pollTimer = $state<ReturnType<typeof setInterval> | null>(null);
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let expandedResources = new SvelteSet<number>();
+	let expandedSteps = new SvelteSet<string>();
 	let localLatestRun = $state<PipelineRun | null>(null);
 	let localResources = $state<ApplicationResource[]>([]);
+	let stepLogs = $state<PipelineStepLog[]>([]);
+	let lastLogId = $state(0);
+	let seeded = false;
+	let isCancelling = $state(false);
+	let cancelError = $state<string | null>(null);
+	let trackedRunId = $state<number | null>(null);
+
+	// Seed step logs from the SSR prop exactly once on mount
+	$effect(() => {
+		if (!seeded && initialStepLogs.length > 0) {
+			seeded = true;
+			stepLogs = initialStepLogs;
+			lastLogId = initialStepLogs[initialStepLogs.length - 1].id;
+		}
+	});
+
+	// Reset local state when the latestRun prop changes to a new run
+	// (e.g. after a retry triggers invalidate and a new pipeline run is created).
+	$effect(() => {
+		const incomingId = latestRun?.id ?? null;
+		if (incomingId !== null && incomingId !== trackedRunId) {
+			trackedRunId = incomingId;
+			localLatestRun = null;
+			localResources = [];
+			stepLogs = [];
+			lastLogId = 0;
+			seeded = false;
+			isCancelling = false;
+			cancelError = null;
+			expandedSteps.clear();
+			expandedResources.clear();
+		}
+	});
 
 	// Use local state if we've been polling, otherwise use props
 	const activeRun = $derived(localLatestRun ?? latestRun);
@@ -41,65 +94,169 @@
 	const isRunning = $derived(activeRun?.status === 'running');
 	const isCompleted = $derived(activeRun?.status === 'completed');
 	const isFailed = $derived(activeRun?.status === 'failed');
+	const isCancelled = $derived(activeRun?.status === 'cancelled');
 	const hasRun = $derived(activeRun !== null);
 
-	// Start polling when a run is active
+	/**
+	 * The step the pipeline failed or was cancelled on.
+	 * Used to offer a "Resume from here" button instead of a full restart.
+	 */
+	const failedStep = $derived.by((): PipelineStep | null => {
+		if (!activeRun) return null;
+		if (activeRun.status !== 'failed' && activeRun.status !== 'cancelled') return null;
+		// current_step is the step that was active when the failure happened
+		return activeRun.current_step ?? null;
+	});
+
+	/**
+	 * Whether we can offer a "resume" option (as opposed to only full retry).
+	 * We can resume if the failed step is NOT the very first step — if it
+	 * failed on research there's nothing to skip.
+	 */
+	const canResume = $derived(failedStep !== null && PIPELINE_STEPS.indexOf(failedStep) > 0);
+
+	// Group step logs by step name
+	const logsByStep = $derived.by(() => {
+		const map: Record<string, PipelineStepLog[]> = {};
+		for (const step of PIPELINE_STEPS) {
+			map[step] = [];
+		}
+		for (const log of stepLogs) {
+			if (!map[log.step]) map[log.step] = [];
+			map[log.step].push(log);
+		}
+		return map;
+	});
+
+	// Auto-expand the currently active step
 	$effect(() => {
-		if (isRunning && !isPolling) {
-			startPolling();
-		} else if (!isRunning && isPolling) {
-			stopPolling();
+		if (activeRun?.current_step && isRunning) {
+			expandedSteps.add(activeRun.current_step);
+		}
+	});
+
+	// Start / stop polling based on run status.
+	$effect(() => {
+		if (isRunning) {
+			if (!pollTimer) {
+				pollTimer = setInterval(pollStatus, 1500);
+			}
+		} else {
+			if (pollTimer) {
+				clearInterval(pollTimer);
+				pollTimer = null;
+			}
 		}
 
 		return () => {
-			stopPolling();
+			if (pollTimer) {
+				clearInterval(pollTimer);
+				pollTimer = null;
+			}
 		};
 	});
 
-	function startPolling() {
-		if (pollTimer) return;
-		isPolling = true;
-		pollTimer = setInterval(async () => {
-			await pollStatus();
-		}, 2000);
-	}
-
-	function stopPolling() {
-		if (pollTimer) {
-			clearInterval(pollTimer);
-			pollTimer = null;
+	// Load full logs when the run changes (e.g. navigating back to an existing run)
+	$effect(() => {
+		if (activeRun && !isRunning && stepLogs.length === 0) {
+			loadFullLogs();
 		}
-		isPolling = false;
+	});
+
+	async function loadFullLogs() {
+		if (!activeRun) return;
+		try {
+			const response = await fetch(`/api/applications/${applicationId}/pipeline`);
+			if (!response.ok) return;
+			const data = await response.json();
+			if (data.stepLogs) {
+				stepLogs = data.stepLogs;
+				if (stepLogs.length > 0) {
+					lastLogId = stepLogs[stepLogs.length - 1].id;
+				}
+			}
+		} catch {
+			// Silently handle
+		}
 	}
 
 	async function pollStatus() {
 		try {
-			const response = await fetch(`/api/applications/${applicationId}/pipeline`);
+			const url = new URL(`/api/applications/${applicationId}/pipeline`, window.location.origin);
+			if (lastLogId > 0) {
+				url.searchParams.set('afterLogId', String(lastLogId));
+			}
+
+			const response = await fetch(url.toString());
 			if (!response.ok) return;
 
 			const data = await response.json();
 			localLatestRun = data.pipelineRun;
 			localResources = data.resources ?? [];
 
-			if (data.pipelineRun && data.pipelineRun.status !== 'running') {
-				stopPolling();
+			// Append new step logs incrementally
+			if (data.stepLogs && data.stepLogs.length > 0) {
+				if (lastLogId === 0) {
+					// First poll — full load
+					stepLogs = data.stepLogs;
+				} else {
+					// Incremental — append new logs
+					stepLogs = [...stepLogs, ...data.stepLogs];
+				}
+				lastLogId = data.stepLogs[data.stepLogs.length - 1].id;
+			}
+
+			if (data.pipelineRun && !['running', 'pending'].includes(data.pipelineRun.status)) {
+				if (pollTimer) {
+					clearInterval(pollTimer);
+					pollTimer = null;
+				}
+				// Reset cancelling state
+				isCancelling = false;
 			}
 		} catch {
 			// Silently handle polling errors
 		}
 	}
 
-	function getStepStatus(step: PipelineStep): 'completed' | 'active' | 'pending' | 'error' {
+	async function handleCancel() {
+		if (isCancelling) return;
+		isCancelling = true;
+		cancelError = null;
+
+		try {
+			const response = await fetch(`/api/applications/${applicationId}/pipeline/cancel`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' }
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				cancelError = data.error ?? 'Failed to cancel pipeline';
+				isCancelling = false;
+			}
+			// Keep isCancelling true until the next poll confirms cancellation
+		} catch (err) {
+			cancelError = err instanceof Error ? err.message : 'Failed to cancel pipeline';
+			isCancelling = false;
+		}
+	}
+
+	function getStepStatus(
+		step: PipelineStep
+	): 'completed' | 'active' | 'pending' | 'error' | 'cancelled' {
 		if (!activeRun) return 'pending';
 
 		if (activeRun.steps_completed.includes(step)) return 'completed';
 		if (activeRun.current_step === step) {
 			if (isFailed) return 'error';
+			if (isCancelled) return 'cancelled';
 			return 'active';
 		}
 
-		// If the run failed and this step hasn't been reached yet
-		if (isFailed) {
+		// If the run failed/cancelled and this step hasn't been reached
+		if (isFailed || isCancelled) {
 			const stepIndex = PIPELINE_STEPS.indexOf(step);
 			const currentStepIndex = activeRun.current_step
 				? PIPELINE_STEPS.indexOf(activeRun.current_step)
@@ -108,6 +265,14 @@
 		}
 
 		return 'pending';
+	}
+
+	function toggleStep(step: string) {
+		if (expandedSteps.has(step)) {
+			expandedSteps.delete(step);
+		} else {
+			expandedSteps.add(step);
+		}
 	}
 
 	function toggleResource(id: number) {
@@ -154,6 +319,40 @@
 
 	function formatResourceType(type: string): string {
 		return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+	}
+
+	function getLogIcon(level: string) {
+		switch (level) {
+			case 'error':
+				return XCircleIcon;
+			case 'warn':
+				return AlertCircleIcon;
+			case 'progress':
+				return CheckCircleIcon;
+			default:
+				return InfoIcon;
+		}
+	}
+
+	function getLogColor(level: string): string {
+		switch (level) {
+			case 'error':
+				return 'text-error-500';
+			case 'warn':
+				return 'text-warning-500';
+			case 'progress':
+				return 'text-primary-500';
+			default:
+				return 'opacity-50';
+		}
+	}
+
+	function formatTime(dateStr: string): string {
+		return new Date(dateStr).toLocaleTimeString('en-US', {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		});
 	}
 </script>
 
@@ -208,20 +407,50 @@
 					{:else if isFailed}
 						<XCircleIcon class="size-5 text-error-500" />
 						<h2 class="text-sm font-bold text-error-500">Pipeline Failed</h2>
+					{:else if isCancelled}
+						<BanIcon class="size-5 text-warning-500" />
+						<h2 class="text-sm font-bold text-warning-500">Pipeline Cancelled</h2>
 					{/if}
 				</div>
-				{#if activeRun?.started_at}
-					<span class="text-xs opacity-50">
-						Started {new Date(activeRun.started_at).toLocaleString()}
-					</span>
-				{/if}
+				<div class="flex items-center gap-2">
+					{#if activeRun?.started_at}
+						<span class="text-xs opacity-50">
+							Started {new Date(activeRun.started_at).toLocaleString()}
+						</span>
+					{/if}
+					{#if isRunning}
+						<button
+							type="button"
+							class="btn-icon preset-filled-error-500"
+							title={isCancelling ? 'Cancelling…' : 'Cancel pipeline'}
+							disabled={isCancelling}
+							onclick={handleCancel}
+						>
+							{#if isCancelling}
+								<LoaderCircleIcon class="size-4 animate-spin" />
+							{:else}
+								<BanIcon class="size-4" />
+							{/if}
+						</button>
+					{/if}
+				</div>
 			</div>
 
+			{#if cancelError}
+				<div class="mb-4 rounded-md border border-error-500/30 bg-error-500/10 p-2">
+					<p class="text-xs text-error-500">{cancelError}</p>
+				</div>
+			{/if}
+
 			<!-- Steps -->
-			<div class="space-y-3">
+			<div class="space-y-1">
 				{#each PIPELINE_STEPS as step, i (step)}
 					{@const status = getStepStatus(step)}
 					{@const isLast = i === PIPELINE_STEPS.length - 1}
+					{@const logs = logsByStep[step] ?? []}
+					{@const isExpanded = expandedSteps.has(step)}
+					{@const hasLogs = logs.length > 0}
+
 					<div class="flex items-start gap-3">
 						<!-- Step indicator -->
 						<div class="flex flex-col items-center">
@@ -232,7 +461,9 @@
 										? 'bg-primary-500/20'
 										: status === 'error'
 											? 'bg-error-500/20'
-											: 'bg-surface-200-800'}"
+											: status === 'cancelled'
+												? 'bg-warning-500/20'
+												: 'bg-surface-200-800'}"
 							>
 								{#if status === 'completed'}
 									<CheckCircleIcon class="size-4 text-success-500" />
@@ -240,40 +471,97 @@
 									<LoaderCircleIcon class="size-4 animate-spin text-primary-500" />
 								{:else if status === 'error'}
 									<XCircleIcon class="size-4 text-error-500" />
+								{:else if status === 'cancelled'}
+									<BanIcon class="size-4 text-warning-500" />
 								{:else}
 									<CircleIcon class="size-4 opacity-30" />
 								{/if}
 							</div>
 							{#if !isLast}
 								<div
-									class="mt-1 h-6 w-px {status === 'completed'
+									class="mt-1 w-px {status === 'completed'
 										? 'bg-success-500/40'
-										: 'bg-surface-300-700'}"
+										: 'bg-surface-300-700'} {isExpanded && hasLogs ? 'h-full' : 'h-6'}"
 								></div>
 							{/if}
 						</div>
 
 						<!-- Step content -->
-						<div class="flex-1 pb-2">
-							<p
-								class="text-sm font-semibold {status === 'completed'
-									? 'text-success-500'
-									: status === 'active'
-										? 'text-primary-500'
-										: status === 'error'
-											? 'text-error-500'
-											: 'opacity-50'}"
+						<div class="min-w-0 flex-1 pb-2">
+							<!-- Step header (clickable to expand logs) -->
+							<button
+								type="button"
+								class="flex w-full items-center gap-2 text-left"
+								onclick={() => toggleStep(step)}
+								disabled={!hasLogs}
 							>
-								{PIPELINE_STEP_LABELS[step]}
-							</p>
+								<p
+									class="flex-1 text-sm font-semibold {status === 'completed'
+										? 'text-success-500'
+										: status === 'active'
+											? 'text-primary-500'
+											: status === 'error'
+												? 'text-error-500'
+												: status === 'cancelled'
+													? 'text-warning-500'
+													: 'opacity-50'}"
+								>
+									{PIPELINE_STEP_LABELS[step]}
+								</p>
+								{#if hasLogs}
+									<span class="flex items-center gap-1 text-[10px] opacity-40">
+										<MessageSquareIcon class="size-3" />
+										{logs.length}
+									</span>
+									{#if isExpanded}
+										<ChevronUpIcon class="size-3.5 opacity-40" />
+									{:else}
+										<ChevronDownIcon class="size-3.5 opacity-40" />
+									{/if}
+								{/if}
+							</button>
+
+							<!-- Step status text -->
 							{#if status === 'active'}
-								<p class="mt-0.5 text-xs opacity-60">In progress…</p>
+								{@const lastLog = logs[logs.length - 1]}
+								{#if lastLog}
+									<p class="mt-0.5 text-xs text-primary-500/80">{lastLog.message}</p>
+								{:else}
+									<p class="mt-0.5 text-xs opacity-60">In progress…</p>
+								{/if}
 							{:else if status === 'completed'}
-								<p class="mt-0.5 text-xs opacity-50">Done</p>
+								{@const lastLog = logs[logs.length - 1]}
+								<p class="mt-0.5 text-xs opacity-50">
+									{lastLog ? lastLog.message : 'Done'}
+								</p>
 							{:else if status === 'error'}
 								<p class="mt-0.5 text-xs text-error-500">
 									{activeRun?.error_message ?? 'An error occurred'}
 								</p>
+							{:else if status === 'cancelled'}
+								<p class="mt-0.5 text-xs text-warning-500">Cancelled by user</p>
+							{/if}
+
+							<!-- Expanded step logs -->
+							{#if isExpanded && hasLogs}
+								<div
+									class="mt-2 max-h-48 space-y-0.5 overflow-y-auto rounded-md border border-surface-200-800 bg-surface-100-900 p-2"
+								>
+									{#each logs as log (log.id)}
+										{@const LogIcon = getLogIcon(log.level)}
+										<div class="flex items-start gap-1.5 py-0.5">
+											<LogIcon class="mt-px size-3 shrink-0 {getLogColor(log.level)}" />
+											<p
+												class="min-w-0 flex-1 text-[11px] leading-relaxed {getLogColor(log.level)}"
+											>
+												{log.message}
+											</p>
+											<span class="shrink-0 text-[9px] tabular-nums opacity-30">
+												{formatTime(log.created_at)}
+											</span>
+										</div>
+									{/each}
+								</div>
 							{/if}
 						</div>
 					</div>
@@ -293,16 +581,27 @@
 				</div>
 			{/if}
 
-			<!-- Retry button for failed runs -->
-			{#if isFailed && isBacklog}
-				<div class="mt-4 flex justify-end">
+			<!-- Action buttons for terminal states -->
+			{#if (isFailed || isCancelled) && isBacklog}
+				<div class="mt-4 flex items-center justify-end gap-2">
+					{#if canResume && failedStep}
+						<button
+							type="button"
+							class="btn gap-2 preset-filled-primary-500 btn-sm"
+							onclick={() => onResumeFrom?.(failedStep)}
+							title="Resume from the step that failed, skipping already-completed steps"
+						>
+							<RefreshCwIcon class="size-3.5" />
+							<span>Resume from {PIPELINE_STEP_LABELS[failedStep]}</span>
+						</button>
+					{/if}
 					<button
 						type="button"
 						class="btn gap-2 preset-filled-warning-500 btn-sm"
 						onclick={() => onApply?.()}
 					>
 						<RefreshCwIcon class="size-3.5" />
-						<span>Retry</span>
+						<span>Retry All</span>
 					</button>
 				</div>
 			{/if}
@@ -369,6 +668,8 @@
 						<CheckCircleIcon class="size-4 shrink-0 text-success-500" />
 					{:else if run.status === 'failed'}
 						<XCircleIcon class="size-4 shrink-0 text-error-500" />
+					{:else if run.status === 'cancelled'}
+						<BanIcon class="size-4 shrink-0 text-warning-500" />
 					{:else}
 						<CircleDotIcon class="size-4 shrink-0 opacity-40" />
 					{/if}

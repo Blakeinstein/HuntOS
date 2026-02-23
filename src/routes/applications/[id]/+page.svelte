@@ -22,7 +22,7 @@
 		LoaderCircleIcon
 	} from '@lucide/svelte';
 	import ApplyProgressPanel from '$lib/components/ApplyProgressPanel.svelte';
-	import type { PipelineRun, ApplicationResource } from '$lib/services/types';
+	import type { PipelineRun, ApplicationResource, PipelineStepLog } from '$lib/services/types';
 
 	let { data } = $props();
 
@@ -37,6 +37,9 @@
 	const resources = $derived(
 		((data as Record<string, unknown>).resources as Array<ApplicationResource>) ?? []
 	);
+	const stepLogs = $derived(
+		((data as Record<string, unknown>).stepLogs as Array<PipelineStepLog>) ?? []
+	);
 
 	let activeTab = $state('details');
 	let notes = $state('');
@@ -45,6 +48,10 @@
 	let applyError = $state<string | null>(null);
 
 	const isBacklog = $derived(application?.swimlane_name?.toLowerCase() === 'backlog');
+	const isActionRequired = $derived(
+		application?.swimlane_name?.toLowerCase() === 'action required'
+	);
+	const canApply = $derived(isBacklog || isActionRequired);
 
 	const formattedCreated = $derived(
 		application
@@ -124,16 +131,22 @@
 		await goto(resolve('/applications'));
 	}
 
-	async function handleApply() {
+	async function handleApply(resumeFrom?: string) {
 		if (!application || isStartingApply) return;
 
 		isStartingApply = true;
 		applyError = null;
 
 		try {
+			const body: Record<string, unknown> = {};
+			if (resumeFrom) {
+				body.resumeFrom = resumeFrom;
+			}
+
 			const response = await fetch(`/api/applications/${application.id}/apply`, {
 				method: 'POST',
-				headers: { 'content-type': 'application/json' }
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body)
 			});
 
 			const result = await response.json();
@@ -183,13 +196,13 @@
 				<span class="badge {getStatusBadgePreset(application.swimlane_name)}">
 					{application.swimlane_name}
 				</span>
-				{#if isBacklog}
+				{#if canApply}
 					<button
 						type="button"
 						class="btn-icon preset-filled-primary-500"
-						title={isStartingApply ? 'Starting…' : 'Apply'}
+						title={isStartingApply ? 'Starting…' : isActionRequired ? 'Retry' : 'Apply'}
 						disabled={isStartingApply}
-						onclick={handleApply}
+						onclick={() => handleApply()}
 					>
 						{#if isStartingApply}
 							<LoaderCircleIcon class="size-4 animate-spin" />
@@ -282,6 +295,8 @@
 						<span class="ml-1.5 badge preset-filled-error-500 text-[10px]">Failed</span>
 					{:else if latestPipelineRun?.status === 'completed'}
 						<span class="ml-1.5 badge preset-filled-success-500 text-[10px]">Done</span>
+					{:else if latestPipelineRun?.status === 'cancelled'}
+						<span class="ml-1.5 badge preset-filled-warning-500 text-[10px]">Cancelled</span>
 					{/if}
 				</Tabs.Trigger>
 				<Tabs.Trigger value="fields">
@@ -367,8 +382,10 @@
 						{pipelineRuns}
 						latestRun={latestPipelineRun}
 						{resources}
-						{isBacklog}
-						onApply={handleApply}
+						isBacklog={canApply}
+						initialStepLogs={stepLogs}
+						onApply={() => handleApply()}
+						onResumeFrom={(step) => handleApply(step)}
 					/>
 				</div>
 			</Tabs.Content>

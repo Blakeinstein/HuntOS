@@ -225,7 +225,7 @@ export class Database {
       CREATE TABLE IF NOT EXISTS application_pipeline_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',   -- 'pending', 'running', 'completed', 'failed'
+        status TEXT NOT NULL DEFAULT 'pending',   -- 'pending', 'running', 'completed', 'failed', 'cancelled'
         current_step TEXT,                         -- 'research', 'resume', 'apply'
         steps_completed TEXT DEFAULT '[]',          -- JSON array of completed step names
         error_message TEXT,
@@ -237,6 +237,22 @@ export class Database {
 
       CREATE INDEX IF NOT EXISTS idx_pipeline_runs_app_id ON application_pipeline_runs(application_id);
       CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON application_pipeline_runs(status);
+
+      -- ── Pipeline Step Logs ────────────────────────────────────────
+      -- Granular progress logs within each pipeline step
+      CREATE TABLE IF NOT EXISTS pipeline_step_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pipeline_run_id INTEGER NOT NULL,
+        step TEXT NOT NULL,                        -- 'research', 'resume', 'apply'
+        level TEXT NOT NULL DEFAULT 'info',         -- 'info', 'warn', 'error', 'progress'
+        message TEXT NOT NULL,
+        meta TEXT,                                  -- optional JSON metadata
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pipeline_run_id) REFERENCES application_pipeline_runs(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_step_logs_run_id ON pipeline_step_logs(pipeline_run_id);
+      CREATE INDEX IF NOT EXISTS idx_step_logs_step ON pipeline_step_logs(pipeline_run_id, step);
     `);
 
 		// ── sqlite-vec virtual table ────────────────────────────────

@@ -79,7 +79,10 @@ export function createServices(db: Database): ServiceContainer {
 		resumeGenerationService,
 		resumeHistoryService,
 		swimlaneService,
-		browserAgentService
+		browserAgentService,
+		appSettingsService,
+		typstResumeService,
+		resumeTemplateService
 	});
 
 	const container: ServiceContainer = {

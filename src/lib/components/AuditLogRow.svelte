@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import {
 		ChevronDownIcon,
 		ChevronRightIcon,
@@ -7,7 +8,8 @@
 		XCircleIcon,
 		InfoIcon,
 		ClockIcon,
-		BotIcon
+		BotIcon,
+		ExternalLinkIcon
 	} from '@lucide/svelte';
 	import type { AuditLogEntry } from '$lib/services/types';
 
@@ -31,7 +33,9 @@
 		scrape: 'Scraping',
 		browser: 'Browser',
 		resume: 'Resume',
-		agent: 'Agent'
+		agent: 'Agent',
+		profile: 'Profile',
+		application: 'Application'
 	};
 
 	const config = $derived(statusConfig[entry.status] ?? statusConfig.info);
@@ -59,6 +63,17 @@
 
 	const hasMeta = $derived(entry.meta && Object.keys(entry.meta).length > 0);
 	const hasExpandableContent = $derived(!!entry.detail || hasMeta);
+
+	/** Extract applicationId from meta for rendering a backlink. */
+	const linkedApplicationId = $derived(
+		entry.meta && typeof entry.meta.applicationId === 'number' ? entry.meta.applicationId : null
+	);
+
+	/** Meta entries excluding applicationId (rendered separately as a link). */
+	const displayMeta = $derived.by(() => {
+		if (!entry.meta) return [];
+		return Object.entries(entry.meta).filter(([key]) => key !== 'applicationId');
+	});
 </script>
 
 <div class="border-b border-surface-200-800 transition-colors hover:bg-surface-100-900/50">
@@ -103,6 +118,16 @@
 						{entry.agent_id}
 					</span>
 				{/if}
+				{#if linkedApplicationId}
+					<a
+						href={resolve(`/applications/${linkedApplicationId}`)}
+						class="flex items-center gap-1 text-primary-500 hover:underline"
+						onclick={(e) => e.stopPropagation()}
+					>
+						<ExternalLinkIcon class="size-3" />
+						Application #{linkedApplicationId}
+					</a>
+				{/if}
 			</div>
 		</div>
 
@@ -130,11 +155,24 @@
 				</div>
 			{/if}
 
-			{#if hasMeta}
+			{#if linkedApplicationId}
+				<div class="mb-3">
+					<h4 class="mb-1 text-xs font-semibold tracking-wide uppercase opacity-40">Application</h4>
+					<a
+						href={resolve(`/applications/${linkedApplicationId}`)}
+						class="inline-flex items-center gap-1.5 rounded-md border border-primary-500/30 bg-primary-500/10 px-2.5 py-1 text-xs font-medium text-primary-500 transition-colors hover:bg-primary-500/20"
+					>
+						<ExternalLinkIcon class="size-3" />
+						View Application #{linkedApplicationId}
+					</a>
+				</div>
+			{/if}
+
+			{#if displayMeta.length > 0}
 				<div>
 					<h4 class="mb-1 text-xs font-semibold tracking-wide uppercase opacity-40">Metadata</h4>
 					<div class="grid gap-1.5">
-						{#each Object.entries(entry.meta ?? {}) as [key, value] (key)}
+						{#each displayMeta as [key, value] (key)}
 							<div class="flex items-start gap-2 text-xs">
 								<span class="shrink-0 font-mono opacity-50">{key}:</span>
 								<span class="font-mono opacity-80">

@@ -66,7 +66,9 @@ export type {
 export type {
 	PipelineRun,
 	PipelineStatus,
-	PipelineStep
+	PipelineStep,
+	PipelineStepLog,
+	PipelineLogLevel
 } from '$lib/services/services/applicationPipeline';
 export { PIPELINE_STEPS, PIPELINE_STEP_LABELS } from '$lib/services/services/applicationPipeline';
 export type { PipelineExecutionResult } from '$lib/services/services/applyPipelineExecutor';

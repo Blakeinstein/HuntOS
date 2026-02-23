@@ -31,7 +31,9 @@
 		scrape: 'Scraping',
 		browser: 'Browser',
 		resume: 'Resume',
-		agent: 'Agent'
+		agent: 'Agent',
+		profile: 'Profile',
+		application: 'Application'
 	};
 
 	const statusLabels: Record<string, string> = {
