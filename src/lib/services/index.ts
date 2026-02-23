@@ -18,6 +18,9 @@ export * from '$lib/services/services/appSettings';
 export * from '$lib/services/services/swimlane';
 export * from '$lib/services/services/auditLog';
 export * from '$lib/services/services/textExtractor';
+export * from '$lib/services/services/applicationResource';
+export * from '$lib/services/services/applicationPipeline';
+export * from '$lib/services/services/applyPipelineExecutor';
 
 export type {
 	Application,
@@ -55,3 +58,15 @@ export type { ExtractionResult, SupportedFormat } from '$lib/services/services/t
 export type { PdfConversionOptions, PdfConversionResult } from '$lib/services/services/pdfService';
 export type { TypstResumeConfig, TypstResumeResult } from '$lib/services/services/typstResume';
 export type { ResumeFormat, AppSetting, AppSettingsMap } from '$lib/services/services/appSettings';
+export type {
+	ApplicationResource,
+	ResourceType,
+	CreateResourceOptions
+} from '$lib/services/services/applicationResource';
+export type {
+	PipelineRun,
+	PipelineStatus,
+	PipelineStep
+} from '$lib/services/services/applicationPipeline';
+export { PIPELINE_STEPS, PIPELINE_STEP_LABELS } from '$lib/services/services/applicationPipeline';
+export type { PipelineExecutionResult } from '$lib/services/services/applyPipelineExecutor';

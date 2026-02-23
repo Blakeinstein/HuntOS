@@ -11,7 +11,7 @@
 		GlobeIcon,
 		LinkedinIcon
 	} from '@lucide/svelte';
-	import type { ProfileLink } from '$lib/services';
+	import type { ProfileLink } from '$lib/services/types';
 
 	interface Props {
 		links: ProfileLink[];

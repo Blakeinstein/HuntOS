@@ -15,6 +15,13 @@ import {
 	createGreenhouseAgent,
 	createGenericAgent
 } from './agents/job-board-agent/index';
+import {
+	createJobApplicationAgent,
+	createApplicationSubAgentRegistry,
+	createLinkedInApplicationAgent,
+	createGreenhouseApplicationAgent,
+	createGenericApplicationAgent
+} from './agents/job-application-agent/index';
 import { logger } from './logger';
 
 const services = createServices(db);
@@ -34,22 +41,38 @@ const resumeAgent = createResumeAgent(
 );
 const jobBoardAgent = createJobBoardAgent();
 
-// Site-specific sub-agents — each is registered with dot-notation keys
+// Job board scraping sub-agents — each is registered with dot-notation keys
 const linkedInAgent = createLinkedInAgent();
 const greenhouseAgent = createGreenhouseAgent();
 const genericAgent = createGenericAgent();
 
-// Sub-agent registry for URL-based routing at runtime
+// Job application sub-agents — responsible for filling out and submitting applications
+const jobApplicationAgent = createJobApplicationAgent();
+const linkedInApplicationAgent = createLinkedInApplicationAgent();
+const greenhouseApplicationAgent = createGreenhouseApplicationAgent();
+const genericApplicationAgent = createGenericApplicationAgent();
+
+// Sub-agent registries for URL-based routing at runtime
 const subAgentRegistry = createJobBoardSubAgentRegistry();
+const applicationSubAgentRegistry = createApplicationSubAgentRegistry();
 
 export const mastra = new Mastra({
 	agents: {
+		// Profile & resume agents
 		'profile-agent': profileAgent,
 		'resume-agent': resumeAgent,
+
+		// Job board scraping agents
 		'job-board-agent': jobBoardAgent,
 		'job-board-agent.linkedin': linkedInAgent,
 		'job-board-agent.greenhouse': greenhouseAgent,
-		'job-board-agent.generic': genericAgent
+		'job-board-agent.generic': genericAgent,
+
+		// Job application agents
+		'job-application-agent': jobApplicationAgent,
+		'job-application-agent.linkedin': linkedInApplicationAgent,
+		'job-application-agent.greenhouse': greenhouseApplicationAgent,
+		'job-application-agent.generic': genericApplicationAgent
 	},
 	storage: new LibSQLStore({
 		id: 'libsql-storage',
@@ -70,4 +93,4 @@ export const mastra = new Mastra({
 // Wire late-bound services that depend on the Mastra instance
 services.withMastra(mastra, subAgentRegistry);
 
-export { services, subAgentRegistry };
+export { services, subAgentRegistry, applicationSubAgentRegistry };

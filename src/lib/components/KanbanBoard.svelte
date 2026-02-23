@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
 	import { PlusIcon, TrashIcon } from '@lucide/svelte';
-	import type { ApplicationWithSwimlane, Swimlane } from '$lib/services';
+	import type { ApplicationWithSwimlane, Swimlane } from '$lib/services/types';
 	import KanbanCard from './KanbanCard.svelte';
 	import AddSwimlaneDialog from './AddSwimlaneDialog.svelte';
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import {
 		FileTextIcon,
 		SparklesIcon,
@@ -27,7 +28,9 @@
 
 	// ── Generate tab state ───────────────────────────────────────
 	let jobDescription = $state('');
+	let generatedFormat = $state<'markdown' | 'typst'>('markdown');
 	let generatedMarkdown = $state('');
+	let generatedYaml = $state('');
 	let generatedData = $state<Record<string, unknown> | null>(null);
 	let generatedHistoryId = $state<number | null>(null);
 	let pdfAvailable = $state(false);
@@ -37,6 +40,12 @@
 	let error = $state('');
 	let success = $state(false);
 	let copied = $state(false);
+
+	/** Whether there's any generated content to show (markdown or yaml) */
+	const hasPreview = $derived(generatedMarkdown.length > 0 || generatedYaml.length > 0);
+
+	/** The resume format setting from the server */
+	const resumeFormat = $derived(data.resumeFormat ?? 'markdown');
 
 	// ── Templates tab state ──────────────────────────────────────
 	let activeTab = $state('chat');
@@ -73,6 +82,7 @@
 		error = '';
 		success = false;
 		generatedMarkdown = '';
+		generatedYaml = '';
 		generatedData = null;
 		generatedHistoryId = null;
 		pdfAvailable = false;
@@ -82,7 +92,8 @@
 				jobDescription: jobDescription.trim(),
 				generatePdf: true
 			};
-			if (effectiveTemplateId) {
+			// Only send templateId for markdown mode
+			if (resumeFormat === 'markdown' && effectiveTemplateId) {
 				body.templateId = effectiveTemplateId;
 			}
 
@@ -98,7 +109,9 @@
 				throw new Error(result.error || `Request failed with status ${response.status}`);
 			}
 
+			generatedFormat = result.format ?? 'markdown';
 			generatedMarkdown = result.markdown ?? '';
+			generatedYaml = result.yaml ?? '';
 			generatedData = result.data ?? null;
 			generatedHistoryId = result.historyId ?? null;
 			pdfAvailable = result.pdfAvailable ?? false;
@@ -114,9 +127,10 @@
 	}
 
 	async function copyMarkdown() {
-		if (!generatedMarkdown) return;
+		const content = generatedFormat === 'typst' ? generatedYaml : generatedMarkdown;
+		if (!content) return;
 		try {
-			await navigator.clipboard.writeText(generatedMarkdown);
+			await navigator.clipboard.writeText(content);
 			copied = true;
 			setTimeout(() => (copied = false), 2000);
 		} catch {
@@ -347,22 +361,31 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 						disabled={isGenerating}
 					></textarea>
 
-					<!-- Template picker — always visible -->
-					<label class="label">
-						<span class="text-xs font-medium opacity-60">Template</span>
-						<select
-							class="select text-sm"
-							value={effectiveTemplateId}
-							onchange={(e) => (selectedTemplateId = Number(e.currentTarget.value))}
-							disabled={isGenerating}
+					<!-- Template picker — only for markdown mode -->
+					{#if resumeFormat === 'markdown'}
+						<label class="label">
+							<span class="text-xs font-medium opacity-60">Template</span>
+							<select
+								class="select text-sm"
+								value={effectiveTemplateId}
+								onchange={(e) => (selectedTemplateId = Number(e.currentTarget.value))}
+								disabled={isGenerating}
+							>
+								{#each templates as tpl (tpl.id)}
+									<option value={tpl.id}>
+										{tpl.name}{tpl.is_default ? ' (default)' : ''}
+									</option>
+								{/each}
+							</select>
+						</label>
+					{:else}
+						<div
+							class="flex items-center gap-2 rounded border border-secondary-500/20 bg-secondary-500/5 px-3 py-2 text-xs"
 						>
-							{#each templates as tpl (tpl.id)}
-								<option value={tpl.id}>
-									{tpl.name}{tpl.is_default ? ' (default)' : ''}
-								</option>
-							{/each}
-						</select>
-					</label>
+							<span class="font-medium text-secondary-500">Typst (NNJR)</span>
+							<span class="opacity-50">— fixed template, produces native PDF</span>
+						</div>
+					{/if}
 
 					<div class="flex items-center justify-between">
 						<span class="text-xs opacity-50">
@@ -408,9 +431,9 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 							Generated Resume
 						</h2>
 
-						{#if generatedMarkdown}
+						{#if hasPreview}
 							<div class="flex items-center gap-1.5">
-								<!-- Copy markdown -->
+								<!-- Copy source (markdown or yaml) -->
 								<button
 									type="button"
 									class="btn gap-1.5 preset-tonal btn-sm"
@@ -421,12 +444,12 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 										<span>Copied!</span>
 									{:else}
 										<CopyIcon class="size-3.5" />
-										<span>Copy</span>
+										<span>{generatedFormat === 'typst' ? 'YAML' : 'Copy'}</span>
 									{/if}
 								</button>
 
-								<!-- Download markdown -->
-								{#if generatedHistoryId}
+								<!-- Download markdown (only in markdown mode) -->
+								{#if generatedHistoryId && generatedFormat === 'markdown'}
 									<button
 										type="button"
 										class="btn gap-1.5 preset-tonal btn-sm"
@@ -464,26 +487,43 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 							<p class="text-sm">Generating your tailored resume…</p>
 							<p class="text-xs opacity-50">This may take a minute or two depending on the LLM.</p>
 						</div>
-					{:else if generatedMarkdown}
-						<!-- Carta markdown editor/preview -->
-						<div
-							class="min-h-0 flex-1 overflow-hidden rounded border border-surface-200-800"
-							style="min-height: 32rem;"
-						>
-							<CartaEditor
-								value={generatedMarkdown}
-								initialTab="preview"
-								disableToolbar
-								class="h-full"
-							/>
-						</div>
+					{:else if hasPreview}
+						{#if generatedFormat === 'typst'}
+							<!-- Typst: show YAML source with syntax highlighting -->
+							<div
+								class="min-h-0 flex-1 overflow-auto rounded border border-surface-200-800 bg-surface-100-900"
+								style="min-height: 32rem;"
+							>
+								<pre
+									class="p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">{generatedYaml}</pre>
+							</div>
+						{:else}
+							<!-- Markdown: Carta editor/preview -->
+							<div
+								class="min-h-0 flex-1 overflow-hidden rounded border border-surface-200-800"
+								style="min-height: 32rem;"
+							>
+								<CartaEditor
+									value={generatedMarkdown}
+									initialTab="preview"
+									disableToolbar
+									class="h-full"
+								/>
+							</div>
+						{/if}
 
 						{#if success && generatedData}
 							<div class="flex items-center gap-3">
 								<p class="flex items-center gap-1.5 text-xs text-success-500">
 									<CheckCircleIcon class="size-3.5" />
-									Resume generated — {(generatedData.skills as string[])?.length ?? 0} skills,
-									{(generatedData.experience as unknown[])?.length ?? 0} experience entries
+									{#if generatedFormat === 'typst'}
+										Resume generated via Typst —
+										{(generatedData.experience as unknown[])?.length ?? 0} experience,
+										{(generatedData.education as unknown[])?.length ?? 0} education entries
+									{:else}
+										Resume generated — {(generatedData.skills as string[])?.length ?? 0} skills,
+										{(generatedData.experience as unknown[])?.length ?? 0} experience entries
+									{/if}
 								</p>
 								{#if pdfAvailable}
 									<span class="badge preset-filled-primary-500 text-[10px]">PDF ready</span>
@@ -511,6 +551,40 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 		<!-- ═══ Templates Tab ═══ -->
 		<Tabs.Content value="templates">
 			<div class="mt-4 space-y-4">
+				{#if resumeFormat === 'typst'}
+					<!-- Typst mode banner -->
+					<div
+						class="flex items-start gap-4 card border border-secondary-500/30 bg-secondary-500/5 p-5"
+					>
+						<div
+							class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary-500/10"
+						>
+							<AlertTriangleIcon class="size-5 text-secondary-500" />
+						</div>
+						<div class="space-y-2">
+							<h3 class="text-sm font-bold">Typst Mode Active</h3>
+							<p class="text-xs opacity-60">
+								You're currently using the
+								<a
+									href="https://github.com/tzx/NNJR"
+									target="_blank"
+									rel="noopener noreferrer"
+									class="font-medium text-secondary-500 underline">NNJR Typst template</a
+								>
+								for resume generation. This template produces clean, typeset PDFs with perfect page-break
+								control.
+							</p>
+							<p class="text-xs opacity-60">
+								Custom Typst template support is <strong>coming soon</strong>. For now, the
+								Handlebars templates below are only used when you switch back to Markdown mode in
+								<a href={resolve('/settings/resume')} class="text-secondary-500 underline"
+									>Settings → Resume Format</a
+								>.
+							</p>
+						</div>
+					</div>
+				{/if}
+
 				{#if templateError}
 					<div class="card border border-error-500/30 bg-error-500/10 p-3">
 						<p class="flex items-center gap-2 text-sm text-error-500">
@@ -525,14 +599,19 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div
-						class="group cursor-pointer card border border-surface-200-800 bg-surface-50-950 p-5 transition-colors hover:border-primary-500/40 hover:bg-primary-500/5"
-						onclick={() =>
-							(modalTemplate = {
+						class="group card border border-surface-200-800 bg-surface-50-950 p-5 transition-colors
+							{resumeFormat === 'typst'
+							? 'opacity-50'
+							: 'cursor-pointer hover:border-primary-500/40 hover:bg-primary-500/5'}"
+						onclick={() => {
+							if (resumeFormat === 'typst') return;
+							modalTemplate = {
 								id: tpl.id,
 								name: tpl.name,
 								content: tpl.content,
 								is_default: tpl.is_default
-							})}
+							};
+						}}
 					>
 						<div class="flex items-start justify-between gap-3">
 							<div class="min-w-0 flex-1">
@@ -546,39 +625,41 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 									Updated {new Date(tpl.updated_at).toLocaleDateString()}
 								</p>
 							</div>
-							<div class="flex shrink-0 items-center gap-1.5">
-								<span
-									class="flex items-center gap-1 text-xs opacity-0 transition-opacity group-hover:opacity-60"
-								>
-									<EyeIcon class="size-3.5" />
-									Click to open
-								</span>
-								{#if tpl.is_default}
-									<button
-										type="button"
-										class="btn-icon btn-icon-sm hover:preset-tonal"
-										title="Reset to built-in default"
-										onclick={(e) => {
-											e.stopPropagation();
-											resetDefault();
-										}}
+							{#if resumeFormat === 'markdown'}
+								<div class="flex shrink-0 items-center gap-1.5">
+									<span
+										class="flex items-center gap-1 text-xs opacity-0 transition-opacity group-hover:opacity-60"
 									>
-										<RotateCcwIcon class="size-3.5" />
-									</button>
-								{:else}
-									<button
-										type="button"
-										class="btn-icon btn-icon-sm hover:preset-tonal-error"
-										title="Delete"
-										onclick={(e) => {
-											e.stopPropagation();
-											deleteTemplate(tpl.id);
-										}}
-									>
-										<Trash2Icon class="size-3.5" />
-									</button>
-								{/if}
-							</div>
+										<EyeIcon class="size-3.5" />
+										Click to open
+									</span>
+									{#if tpl.is_default}
+										<button
+											type="button"
+											class="btn-icon btn-icon-sm hover:preset-tonal"
+											title="Reset to built-in default"
+											onclick={(e) => {
+												e.stopPropagation();
+												resetDefault();
+											}}
+										>
+											<RotateCcwIcon class="size-3.5" />
+										</button>
+									{:else}
+										<button
+											type="button"
+											class="btn-icon btn-icon-sm hover:preset-tonal-error"
+											title="Delete"
+											onclick={(e) => {
+												e.stopPropagation();
+												deleteTemplate(tpl.id);
+											}}
+										>
+											<Trash2Icon class="size-3.5" />
+										</button>
+									{/if}
+								</div>
+							{/if}
 						</div>
 
 						<!-- Content preview -->
@@ -591,77 +672,96 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 					</div>
 				{/each}
 
-				<!-- Add new template -->
-				{#if isAddingTemplate}
-					<div class="space-y-3 card border border-primary-500/30 bg-primary-500/5 p-5">
-						<h3 class="text-sm font-bold">New Template</h3>
-						<input
-							type="text"
-							class="input text-sm"
-							placeholder="Template name (e.g. 'Minimal', 'Academic')"
-							bind:value={newTemplateName}
-						/>
-						<textarea
-							class="textarea min-h-50 font-mono text-xs"
-							placeholder={'Handlebars template content...\n\nUse variables like {{name}}, {{professional_profile}}, {{#each skills}}, {{#each experience}}, etc.'}
-							bind:value={newTemplateContent}
-						></textarea>
-						<div class="flex justify-end gap-2">
-							<button
-								type="button"
-								class="btn gap-1.5 preset-tonal btn-sm"
-								onclick={() => {
-									isAddingTemplate = false;
-									newTemplateName = '';
-									newTemplateContent = '';
-								}}
-							>
-								<XIcon class="size-3.5" />
-								Cancel
-							</button>
-							<button
-								type="button"
-								class="btn gap-1.5 preset-filled-primary-500 btn-sm"
-								disabled={templateSaving || !newTemplateName.trim() || !newTemplateContent.trim()}
-								onclick={createTemplate}
-							>
-								{#if templateSaving}
-									<LoaderCircleIcon class="size-3.5 animate-spin" />
-								{:else}
-									<CheckCircleIcon class="size-3.5" />
-								{/if}
-								Create
-							</button>
+				<!-- Add new template (markdown mode only) -->
+				{#if resumeFormat === 'markdown'}
+					{#if isAddingTemplate}
+						<div class="space-y-3 card border border-primary-500/30 bg-primary-500/5 p-5">
+							<h3 class="text-sm font-bold">New Template</h3>
+							<input
+								type="text"
+								class="input text-sm"
+								placeholder="Template name (e.g. 'Minimal', 'Academic')"
+								bind:value={newTemplateName}
+							/>
+							<textarea
+								class="textarea min-h-50 font-mono text-xs"
+								placeholder={'Handlebars template content...\n\nUse variables like {{name}}, {{professional_profile}}, {{#each skills}}, {{#each experience}}, etc.'}
+								bind:value={newTemplateContent}
+							></textarea>
+							<div class="flex justify-end gap-2">
+								<button
+									type="button"
+									class="btn gap-1.5 preset-tonal btn-sm"
+									onclick={() => {
+										isAddingTemplate = false;
+										newTemplateName = '';
+										newTemplateContent = '';
+									}}
+								>
+									<XIcon class="size-3.5" />
+									Cancel
+								</button>
+								<button
+									type="button"
+									class="btn gap-1.5 preset-filled-primary-500 btn-sm"
+									disabled={templateSaving || !newTemplateName.trim() || !newTemplateContent.trim()}
+									onclick={createTemplate}
+								>
+									{#if templateSaving}
+										<LoaderCircleIcon class="size-3.5 animate-spin" />
+									{:else}
+										<CheckCircleIcon class="size-3.5" />
+									{/if}
+									Create
+								</button>
+							</div>
 						</div>
-					</div>
-				{:else}
-					<button
-						type="button"
-						class="btn w-full gap-2 preset-tonal"
-						onclick={() => (isAddingTemplate = true)}
-					>
-						<PlusIcon class="size-4" />
-						Add Custom Template
-					</button>
+					{:else}
+						<button
+							type="button"
+							class="btn w-full gap-2 preset-tonal"
+							onclick={() => (isAddingTemplate = true)}
+						>
+							<PlusIcon class="size-4" />
+							Add Custom Template
+						</button>
+					{/if}
 				{/if}
 
 				<!-- Help text -->
 				<div class="rounded border border-surface-200-800 bg-surface-100-900 p-4">
-					<h4 class="text-xs font-bold opacity-70">Template Variables</h4>
-					<p class="mt-1 text-[11px] leading-relaxed opacity-50">
-						Templates use <strong>Handlebars</strong> syntax. Available variables:
-						<code>name</code>, <code>professional_profile</code>,
-						<code>skills</code> (array), <code>experience</code> (array with
-						<code>job_title</code>, <code>company</code>, <code>location</code>,
-						<code>start_date</code>, <code>end_date</code>, <code>achievements</code>),
-						<code>education</code> (array with <code>degree</code>,
-						<code>institution</code>, <code>location</code>,
-						<code>graduation_date</code>), <code>certifications</code> (array with
-						<code>name</code>, <code>issuer</code>, <code>date</code>),
-						<code>projects</code> (array with <code>name</code>,
-						<code>description</code>, <code>technologies</code>),
-						<code>additional_info</code> (key-value object).
-					</p>
+					{#if resumeFormat === 'typst'}
+						<h4 class="text-xs font-bold opacity-70">About the NNJR Template</h4>
+						<p class="mt-1 text-[11px] leading-relaxed opacity-50">
+							The
+							<a
+								href="https://github.com/tzx/NNJR"
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-secondary-500 underline">NNJR</a
+							>
+							template is a clean Typst resume layout inspired by Jake's Resume. It compiles structured
+							YAML data into a pixel-perfect PDF with sections for personal info, education, experience,
+							projects, and categorised technical skills. Switch to
+							<strong>Markdown</strong> mode in settings to use customisable Handlebars templates instead.
+						</p>
+					{:else}
+						<h4 class="text-xs font-bold opacity-70">Template Variables</h4>
+						<p class="mt-1 text-[11px] leading-relaxed opacity-50">
+							Templates use <strong>Handlebars</strong> syntax. Available variables:
+							<code>name</code>, <code>professional_profile</code>,
+							<code>skills</code> (array), <code>experience</code> (array with
+							<code>job_title</code>, <code>company</code>, <code>location</code>,
+							<code>start_date</code>, <code>end_date</code>, <code>achievements</code>),
+							<code>education</code> (array with <code>degree</code>,
+							<code>institution</code>, <code>location</code>,
+							<code>graduation_date</code>), <code>certifications</code> (array with
+							<code>name</code>, <code>issuer</code>, <code>date</code>),
+							<code>projects</code> (array with <code>name</code>,
+							<code>description</code>, <code>technologies</code>),
+							<code>additional_info</code> (key-value object).
+						</p>
+					{/if}
 				</div>
 			</div>
 		</Tabs.Content>

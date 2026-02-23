@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { EmailAccount } from '$lib/services';
+import type { EmailAccount } from '$lib/services/types';
 
 export const emailAccounts = writable<EmailAccount[]>([]);
 export const emailAccountsLoading = writable(false);

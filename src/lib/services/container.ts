@@ -15,6 +15,9 @@ import { EmailMonitorService } from '$lib/services/services/emailMonitor';
 import { BrowserAgentService } from '$lib/services/services/browserAgent';
 import { AuditLogService } from '$lib/services/services/auditLog';
 import { DocumentService } from '$lib/services/services/document';
+import { ApplicationResourceService } from '$lib/services/services/applicationResource';
+import { ApplicationPipelineService } from '$lib/services/services/applicationPipeline';
+import { ApplyPipelineExecutor } from '$lib/services/services/applyPipelineExecutor';
 import type { Mastra } from '@mastra/core';
 import type { SubAgentRegistry } from '$lib/mastra/agents/job-board-agent/registry';
 
@@ -35,6 +38,9 @@ export interface ServiceContainer {
 	browserAgentService: BrowserAgentService;
 	auditLogService: AuditLogService;
 	documentService: DocumentService;
+	applicationResourceService: ApplicationResourceService;
+	applicationPipelineService: ApplicationPipelineService;
+	applyPipelineExecutor: ApplyPipelineExecutor;
 
 	/**
 	 * Wire late-bound services that depend on the Mastra instance.
@@ -59,9 +65,25 @@ export function createServices(db: Database): ServiceContainer {
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
 	const documentService = new DocumentService(db, auditLogService);
+	const applicationService = new ApplicationService(db);
+	const swimlaneService = new SwimlaneService(db);
+	const browserAgentService = new BrowserAgentService(db, profileService, resumeService);
+	const applicationResourceService = new ApplicationResourceService(db);
+	const applicationPipelineService = new ApplicationPipelineService(db);
+	const applyPipelineExecutor = new ApplyPipelineExecutor({
+		applicationService,
+		pipelineService: applicationPipelineService,
+		resourceService: applicationResourceService,
+		auditLogService,
+		profileService,
+		resumeGenerationService,
+		resumeHistoryService,
+		swimlaneService,
+		browserAgentService
+	});
 
 	const container: ServiceContainer = {
-		applicationService: new ApplicationService(db),
+		applicationService,
 		profileService,
 		resumeService,
 		resumeGenerationService,
@@ -70,13 +92,16 @@ export function createServices(db: Database): ServiceContainer {
 		pdfService,
 		typstResumeService,
 		appSettingsService,
-		swimlaneService: new SwimlaneService(db),
+		swimlaneService,
 		jobBoardService,
 		jobBoardScraperService: null,
 		emailMonitorService: new EmailMonitorService(db),
-		browserAgentService: new BrowserAgentService(db, profileService, resumeService),
+		browserAgentService,
 		auditLogService,
 		documentService,
+		applicationResourceService,
+		applicationPipelineService,
+		applyPipelineExecutor,
 
 		withMastra(mastra: Mastra, subAgentRegistry: SubAgentRegistry) {
 			container.jobBoardScraperService = new JobBoardScraperService(

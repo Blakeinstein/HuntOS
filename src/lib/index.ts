@@ -1,2 +1,2 @@
-export * from '$lib/services';
+export * from '$lib/services/types';
 export * from '$lib/stores';

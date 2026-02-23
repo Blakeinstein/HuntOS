@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { ProfileData, ProfileKey } from '$lib/services';
+import type { ProfileData, ProfileKey } from '$lib/services/types';
 
 export const profile = writable<ProfileData>({});
 export const profileIncompleteFields = writable<ProfileKey[]>([]);

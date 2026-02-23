@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidate } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Tabs } from '@skeletonlabs/skeleton-svelte';
 	import {
 		ArrowLeftIcon,
@@ -15,17 +16,35 @@
 		CircleDotIcon,
 		PencilIcon,
 		TrashIcon,
-		StickyNoteIcon
+		StickyNoteIcon,
+		RocketIcon,
+		PlayIcon,
+		LoaderCircleIcon
 	} from '@lucide/svelte';
+	import ApplyProgressPanel from '$lib/components/ApplyProgressPanel.svelte';
+	import type { PipelineRun, ApplicationResource } from '$lib/services/types';
 
 	let { data } = $props();
 
 	const application = $derived(data.application);
 	const history = $derived(data.history ?? []);
+	const pipelineRuns = $derived(
+		((data as Record<string, unknown>).pipelineRuns as Array<PipelineRun>) ?? []
+	);
+	const latestPipelineRun = $derived(
+		((data as Record<string, unknown>).latestPipelineRun as PipelineRun | null) ?? null
+	);
+	const resources = $derived(
+		((data as Record<string, unknown>).resources as Array<ApplicationResource>) ?? []
+	);
 
 	let activeTab = $state('details');
 	let notes = $state('');
 	let isDeleting = $state(false);
+	let isStartingApply = $state(false);
+	let applyError = $state<string | null>(null);
+
+	const isBacklog = $derived(application?.swimlane_name?.toLowerCase() === 'backlog');
 
 	const formattedCreated = $derived(
 		application
@@ -102,7 +121,38 @@
 		if (!application) return;
 		isDeleting = true;
 		await fetch(`/api/applications/${application.id}`, { method: 'DELETE' });
-		await goto('/applications');
+		await goto(resolve('/applications'));
+	}
+
+	async function handleApply() {
+		if (!application || isStartingApply) return;
+
+		isStartingApply = true;
+		applyError = null;
+
+		try {
+			const response = await fetch(`/api/applications/${application.id}/apply`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' }
+			});
+
+			const result = await response.json();
+
+			if (!response.ok) {
+				applyError = result.error ?? 'Failed to start apply pipeline';
+				return;
+			}
+
+			// Switch to the apply progress tab and let the panel poll for updates
+			activeTab = 'apply';
+
+			// Invalidate the page data so pipeline runs appear
+			await invalidate(`db:application:${application.id}`);
+		} catch (err) {
+			applyError = err instanceof Error ? err.message : 'Failed to start apply pipeline';
+		} finally {
+			isStartingApply = false;
+		}
 	}
 </script>
 
@@ -112,7 +162,7 @@
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex items-start gap-3">
 				<a
-					href="/applications"
+					href={resolve('/applications')}
 					class="mt-1 btn-icon btn-icon-sm preset-tonal"
 					aria-label="Back to roadmap"
 				>
@@ -133,9 +183,24 @@
 				<span class="badge {getStatusBadgePreset(application.swimlane_name)}">
 					{application.swimlane_name}
 				</span>
+				{#if isBacklog}
+					<button
+						type="button"
+						class="btn-icon preset-filled-primary-500"
+						title={isStartingApply ? 'Starting…' : 'Apply'}
+						disabled={isStartingApply}
+						onclick={handleApply}
+					>
+						{#if isStartingApply}
+							<LoaderCircleIcon class="size-4 animate-spin" />
+						{:else}
+							<PlayIcon class="size-4" />
+						{/if}
+					</button>
+				{/if}
 				<button
 					type="button"
-					class="btn-icon btn-icon-sm hover:preset-tonal-error"
+					class="btn-icon preset-filled-error-500"
 					title="Delete application"
 					disabled={isDeleting}
 					onclick={handleDelete}
@@ -144,6 +209,16 @@
 				</button>
 			</div>
 		</div>
+
+		<!-- Apply error banner -->
+		{#if applyError}
+			<div class="card border border-error-500/30 bg-error-500/10 p-3">
+				<div class="flex items-center gap-2">
+					<AlertCircleIcon class="size-4 text-error-500" />
+					<p class="text-sm text-error-500">{applyError}</p>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Summary row -->
 		<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -175,7 +250,7 @@
 						<a
 							href={application.job_description_url}
 							target="_blank"
-							rel="noopener noreferrer"
+							rel="external noopener noreferrer"
 							class="inline-flex items-center gap-1 text-primary-500 hover:underline"
 						>
 							<ExternalLinkIcon class="size-3.5" />
@@ -194,6 +269,20 @@
 				<Tabs.Trigger value="details">
 					<FileTextIcon class="mr-1.5 size-4" />
 					Details
+				</Tabs.Trigger>
+				<Tabs.Trigger value="apply">
+					<RocketIcon class="mr-1.5 size-4" />
+					Apply Progress
+					{#if latestPipelineRun?.status === 'running'}
+						<span class="ml-1.5 badge preset-filled-primary-500 text-[10px]">
+							<LoaderCircleIcon class="mr-0.5 size-2.5 animate-spin" />
+							Live
+						</span>
+					{:else if latestPipelineRun?.status === 'failed'}
+						<span class="ml-1.5 badge preset-filled-error-500 text-[10px]">Failed</span>
+					{:else if latestPipelineRun?.status === 'completed'}
+						<span class="ml-1.5 badge preset-filled-success-500 text-[10px]">Done</span>
+					{/if}
 				</Tabs.Trigger>
 				<Tabs.Trigger value="fields">
 					<PencilIcon class="mr-1.5 size-4" />
@@ -243,7 +332,7 @@
 									<a
 										href={application.job_description_url}
 										target="_blank"
-										rel="noopener noreferrer"
+										rel="external noopener noreferrer"
 										class="inline-flex items-center gap-1 text-primary-500 hover:underline"
 									>
 										<ExternalLinkIcon class="size-3.5" />
@@ -267,6 +356,20 @@
 							</div>
 						</div>
 					{/if}
+				</div>
+			</Tabs.Content>
+
+			<!-- Apply Progress tab -->
+			<Tabs.Content value="apply">
+				<div class="mt-4">
+					<ApplyProgressPanel
+						applicationId={application.id}
+						{pipelineRuns}
+						latestRun={latestPipelineRun}
+						{resources}
+						{isBacklog}
+						onApply={handleApply}
+					/>
 				</div>
 			</Tabs.Content>
 
@@ -326,6 +429,11 @@
 							<div class="text-center">
 								<FileTextIcon class="mx-auto size-8 opacity-30" />
 								<p class="mt-2 text-sm opacity-50">No form fields recorded yet.</p>
+								{#if isBacklog}
+									<p class="mt-1 text-xs opacity-40">
+										Form fields will be discovered when the apply pipeline runs.
+									</p>
+								{/if}
 							</div>
 						</div>
 					{/if}
@@ -413,7 +521,7 @@
 		<div class="text-center">
 			<AlertCircleIcon class="mx-auto size-12 opacity-30" />
 			<p class="mt-3 text-lg opacity-50">Application not found</p>
-			<a href="/applications" class="mt-4 btn preset-tonal">Back to Roadmap</a>
+			<a href={resolve('/applications')} class="mt-4 btn preset-tonal">Back to Roadmap</a>
 		</div>
 	</div>
 {/if}

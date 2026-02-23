@@ -9,7 +9,7 @@
 		ClockIcon,
 		BotIcon
 	} from '@lucide/svelte';
-	import type { AuditLogEntry } from '$lib/services/services/auditLog';
+	import type { AuditLogEntry } from '$lib/services/types';
 
 	interface Props {
 		entry: AuditLogEntry;

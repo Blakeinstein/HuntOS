@@ -1,5 +1,5 @@
 import { derived, writable } from 'svelte/store';
-import type { Swimlane } from '$lib/services';
+import type { Swimlane } from '$lib/services/types';
 
 export const swimlanes = writable<Swimlane[]>([]);
 export const selectedSwimlane = writable<Swimlane | null>(null);

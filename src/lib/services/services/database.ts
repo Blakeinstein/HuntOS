@@ -203,6 +203,40 @@ export class Database {
       );
 
       CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
+
+      -- ── Application Resources ─────────────────────────────────────
+      -- Research data gathered during the apply pipeline (company info, role details, etc.)
+      CREATE TABLE IF NOT EXISTS application_resources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER NOT NULL,
+        resource_type TEXT NOT NULL,          -- 'job_description', 'company_info', 'role_research', 'resume', 'error'
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        meta TEXT,                             -- JSON blob for structured data
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_application_resources_app_id ON application_resources(application_id);
+      CREATE INDEX IF NOT EXISTS idx_application_resources_type ON application_resources(resource_type);
+
+      -- ── Application Pipeline Runs ─────────────────────────────────
+      -- Tracks the multi-step apply pipeline execution state
+      CREATE TABLE IF NOT EXISTS application_pipeline_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',   -- 'pending', 'running', 'completed', 'failed'
+        current_step TEXT,                         -- 'research', 'resume', 'apply'
+        steps_completed TEXT DEFAULT '[]',          -- JSON array of completed step names
+        error_message TEXT,
+        started_at DATETIME,
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pipeline_runs_app_id ON application_pipeline_runs(application_id);
+      CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON application_pipeline_runs(status);
     `);
 
 		// ── sqlite-vec virtual table ────────────────────────────────

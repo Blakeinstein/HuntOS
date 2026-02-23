@@ -1,6 +1,14 @@
 <script lang="ts">
-	import { BriefcaseIcon, BuildingIcon, CalendarIcon, ExternalLinkIcon } from '@lucide/svelte';
-	import type { ApplicationWithSwimlane } from '$lib/services';
+	import { resolve } from '$app/paths';
+	import {
+		BriefcaseIcon,
+		BuildingIcon,
+		CalendarIcon,
+		ExternalLinkIcon,
+		PlayIcon,
+		LoaderCircleIcon
+	} from '@lucide/svelte';
+	import type { ApplicationWithSwimlane } from '$lib/services/types';
 
 	interface Props {
 		application: ApplicationWithSwimlane;
@@ -10,6 +18,11 @@
 	}
 
 	let { application, isDragging, onDragStart, onDragEnd }: Props = $props();
+
+	let isApplying = $state(false);
+	let applyError = $state<string | null>(null);
+
+	const isBacklog = $derived(application.swimlane_name.toLowerCase() === 'backlog');
 
 	const formattedDate = $derived(
 		new Date(application.created_at).toLocaleDateString('en-US', {
@@ -22,10 +35,41 @@
 		application.fields?.filter((f) => f.status === 'missing' || f.status === 'user_input_required')
 			.length ?? 0
 	);
+
+	async function handleApply(event: MouseEvent) {
+		event.preventDefault();
+		event.stopPropagation();
+
+		if (isApplying) return;
+
+		isApplying = true;
+		applyError = null;
+
+		try {
+			const response = await fetch(`/api/applications/${application.id}/apply`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' }
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				applyError = data.error ?? 'Failed to start apply pipeline';
+				return;
+			}
+
+			// Navigate to the application detail page to see progress
+			window.location.href = resolve(`/applications/${application.id}`);
+		} catch (err) {
+			applyError = err instanceof Error ? err.message : 'Failed to start apply pipeline';
+		} finally {
+			isApplying = false;
+		}
+	}
 </script>
 
 <a
-	href="/applications/{application.id}"
+	href={resolve(`/applications/${application.id}`)}
 	class="block cursor-grab card rounded-md border border-surface-200-800 bg-surface-50-950 p-3 shadow-sm transition-all hover:border-primary-500 hover:shadow-md active:cursor-grabbing"
 	class:opacity-40={isDragging}
 	class:ring-2={isDragging}
@@ -73,4 +117,27 @@
 			{/if}
 		</div>
 	</div>
+
+	<!-- Apply button for backlog items -->
+	{#if isBacklog}
+		<div class="mt-2 border-t border-surface-200-800 pt-2">
+			<button
+				type="button"
+				class="btn w-full gap-1.5 preset-filled-primary-500 btn-sm"
+				disabled={isApplying}
+				onclick={handleApply}
+			>
+				{#if isApplying}
+					<LoaderCircleIcon class="size-3.5 animate-spin" />
+					<span>Starting…</span>
+				{:else}
+					<PlayIcon class="size-3.5" />
+					<span>Apply</span>
+				{/if}
+			</button>
+			{#if applyError}
+				<p class="mt-1 text-[10px] text-error-500">{applyError}</p>
+			{/if}
+		</div>
+	{/if}
 </a>

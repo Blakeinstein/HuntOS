@@ -164,7 +164,7 @@
 	}
 
 	function isFieldIncomplete(key: string): boolean {
-		return incompleteFields.includes(key as import('$lib/services').ProfileKey);
+		return incompleteFields.includes(key as import('$lib/services/types').ProfileKey);
 	}
 
 	function getCompletenessColor(): string {
