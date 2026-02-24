@@ -250,6 +250,19 @@ export class ResumeHistoryService {
 	}
 
 	/**
+	 * Get the most recent resume history entry linked to a specific application.
+	 *
+	 * @returns The latest entry for the application, or `null` if none exists.
+	 */
+	getByApplicationId(applicationId: number): ResumeHistoryEntry | null {
+		const row = this.db.get<ResumeHistoryRow>(
+			'SELECT * FROM resume_history WHERE application_id = ? ORDER BY created_at DESC LIMIT 1',
+			[applicationId]
+		);
+		return row ? this.hydrate(row) : null;
+	}
+
+	/**
 	 * Read the Markdown content of a saved resume from disk.
 	 *
 	 * @returns The file content, or `null` if the file is missing.

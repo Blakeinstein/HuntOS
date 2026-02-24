@@ -1,10 +1,7 @@
 import { browserTools } from '../../tools/browser';
-import { withToolLoggingAll } from '../../tools/with-logging';
+import { withToolLoggingAll, type ToolLoggingOptions } from '../../tools/with-logging';
 import { createAgent } from '../create-agent';
-import {
-	jobApplicationRequestContextSchema,
-	type JobApplicationRequestContext
-} from './types';
+import { jobApplicationRequestContextSchema, type JobApplicationRequestContext } from './types';
 
 /**
  * Creates a generic job application sub-agent used as a fallback
@@ -19,7 +16,7 @@ import {
  *
  * Prompt: `prompts/job-application-agent/job-application-agent.generic.md`
  */
-export function createGenericApplicationAgent() {
+export function createGenericApplicationAgent(toolLogging?: ToolLoggingOptions) {
 	return createAgent({
 		id: 'job-application-agent.generic',
 		name: 'Generic Job Application Agent',
@@ -32,7 +29,7 @@ export function createGenericApplicationAgent() {
 			'Resume File Path': `\`${requestContext.get('resume-file-path') as JobApplicationRequestContext['resume-file-path']}\``
 		}),
 		tools: {
-			...withToolLoggingAll(browserTools)
+			...withToolLoggingAll(browserTools, toolLogging)
 		}
 	});
 }

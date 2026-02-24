@@ -9,14 +9,15 @@ import type { ApplicationResourceService } from '$lib/services/services/applicat
 import type { AuditLogService } from '$lib/services/services/auditLog';
 
 const resourceTypeEnum = z
-	.enum(['job_description', 'company_info', 'role_research', 'resume', 'error'])
+	.enum(['job_description', 'company_info', 'role_research', 'resume', 'error', 'form_fields'])
 	.describe(
 		'The category of resource being logged: ' +
 			'job_description = extracted job posting text, ' +
 			'company_info = researched company details, ' +
 			'role_research = analysis of the role and requirements, ' +
 			'resume = generated resume content, ' +
-			'error = an error encountered during the pipeline'
+			'error = an error encountered during the pipeline, ' +
+			'form_fields = form fields discovered and filled during application'
 	);
 
 export function createLogResourceTool(

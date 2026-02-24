@@ -10,13 +10,11 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createServices } from '$lib/services';
-import { db } from '$lib/db';
+import { services } from '$lib/mastra';
 import { PIPELINE_STEPS } from '$lib/services/services/applicationPipeline';
 import type { PipelineStep } from '$lib/services/services/applicationPipeline';
 
 export const POST: RequestHandler = async ({ params, request }) => {
-	const services = createServices(db);
 	const applicationId = Number(params.id);
 
 	if (Number.isNaN(applicationId) || applicationId <= 0) {

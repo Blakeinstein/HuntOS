@@ -26,12 +26,23 @@ import type { ResumeGenerationService, ResumeGenerationResult } from './resumeGe
 import type { ResumeData } from '../resume/schema';
 import type { ResumeHistoryService } from './resumeHistory';
 import type { SwimlaneService } from './swimlane';
-import type { BrowserAgentService, BrowserAutomationResult } from './browserAgent';
+import type { BrowserAgentService } from './browserAgent';
 import type { AppSettingsService } from './appSettings';
 import type { TypstResumeService } from './typstResume';
 import type { ResumeTemplateService } from './resumeTemplate';
+import type { ApplicationSubAgentRegistry } from '$lib/mastra/agents/job-application-agent/registry';
+import type { Mastra } from '@mastra/core';
+import {
+	applicationResultSchema,
+	type ApplicationResult,
+	type ApplicationField
+} from '$lib/mastra/agents/job-application-agent/types';
+import { RequestContext } from '@mastra/core/request-context';
+import type { JobApplicationRequestContext } from '$lib/mastra/agents/job-application-agent/types';
+import fs from 'fs';
 import { PIPELINE_STEPS } from './applicationPipeline';
 import { browserExec } from '$lib/mastra/tools/browser/exec';
+import path from 'path';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -39,6 +50,22 @@ export interface PipelineExecutionResult {
 	success: boolean;
 	pipelineRunId: number;
 	error?: string;
+}
+
+export interface ApplyStepResult {
+	success: boolean;
+	submitted: boolean;
+	blocked: boolean;
+	blockedReason?: string | null;
+	fieldsFilled: number;
+	fieldsMissing: number;
+	resumeUploaded: boolean;
+	coverLetterProvided: boolean;
+	formPagesVisited: number;
+	fields: ApplicationField[];
+	errors: string[];
+	notes?: string | null;
+	screenshotTaken: boolean;
 }
 
 export interface PipelineExecutionOptions {
@@ -118,6 +145,8 @@ export class ApplyPipelineExecutor {
 	private appSettingsService: AppSettingsService;
 	private typstResumeService: TypstResumeService;
 	private resumeTemplateService: ResumeTemplateService;
+	private applicationSubAgentRegistry: ApplicationSubAgentRegistry | null = null;
+	private mastra: Mastra | null = null;
 
 	constructor(deps: {
 		applicationService: ApplicationService;
@@ -145,6 +174,29 @@ export class ApplyPipelineExecutor {
 		this.appSettingsService = deps.appSettingsService;
 		this.typstResumeService = deps.typstResumeService;
 		this.resumeTemplateService = deps.resumeTemplateService;
+	}
+
+	/**
+	 * Wire the application sub-agent registry after construction.
+	 *
+	 * This is set via the service container's `withMastra()` call to
+	 * break the circular dependency: the registry is created alongside
+	 * the Mastra instance, which itself depends on the service container.
+	 */
+	setApplicationSubAgentRegistry(registry: ApplicationSubAgentRegistry): void {
+		this.applicationSubAgentRegistry = registry;
+	}
+
+	/**
+	 * Wire the Mastra instance after construction.
+	 *
+	 * When set, the executor uses `mastra.getAgent(agentId)` to retrieve
+	 * agents that are already registered with the Mastra instance — this
+	 * ensures observability, tracing, and telemetry are wired in and
+	 * LLM invocations appear in Mastra Studio.
+	 */
+	setMastra(mastra: Mastra): void {
+		this.mastra = mastra;
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────
@@ -1112,14 +1164,20 @@ export class ApplyPipelineExecutor {
 	}
 
 	/**
-	 * Step 3: Apply — navigate to the job posting and attempt to fill out
-	 * and submit the application form.
+	 * Step 3: Apply — navigate to the job posting and use the Mastra
+	 * job-application agent to fill out and submit the application form.
+	 *
+	 * The agent is selected via the ApplicationSubAgentRegistry based on
+	 * the job URL (LinkedIn, Greenhouse, or generic fallback). It receives
+	 * the user profile, job description, resume data, and resume PDF path
+	 * via RequestContext, then uses browser tools to navigate and fill the
+	 * form autonomously.
 	 */
 	private async executeApplyStep(
 		runId: number,
 		application: ApplicationWithSwimlane,
 		resumeResult: ResumeGenerationResult
-	): Promise<BrowserAutomationResult> {
+	): Promise<ApplyStepResult> {
 		const step: PipelineStep = 'apply';
 		this.pipelineService.startStep(runId, step);
 
@@ -1136,109 +1194,385 @@ export class ApplyPipelineExecutor {
 				throw new Error('No job posting URL available — cannot auto-apply');
 			}
 
+			this.checkCancelled(runId);
+
+			// ── Resolve the sub-agent for this URL ───────────────────
+			if (!this.applicationSubAgentRegistry) {
+				throw new Error(
+					'ApplicationSubAgentRegistry not wired — call setApplicationSubAgentRegistry() ' +
+						'via the service container withMastra() lifecycle hook before running the pipeline.'
+				);
+			}
+
+			const url = application.job_description_url;
+			const entry = this.applicationSubAgentRegistry.resolveOrThrow(url);
 			this.log(
 				runId,
 				step,
-				`Navigating to job posting: ${application.job_description_url}`,
+				`Resolved application agent: ${entry.site} (${entry.agentId})`,
 				'progress'
 			);
 
+			this.auditLogService.create({
+				category: 'agent',
+				agent_id: entry.agentId,
+				status: 'success',
+				title: `Resolved sub-agent: ${entry.site}`,
+				detail: `URL: ${url} → Agent: ${entry.agentId}`,
+				meta: { applicationId: application.id, url, site: entry.site }
+			});
+
+			// Prefer the Mastra-registered agent so observability / tracing is
+			// wired in and LLM invocations appear in Mastra Studio. Fall back
+			// to the registry factory if Mastra is not available.
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const agent = this.mastra ? (this.mastra as any).getAgent(entry.agentId) : entry.create();
+
+			// ── Build the request context ────────────────────────────
+			this.log(runId, step, 'Preparing application context…', 'progress');
+
+			const profile = await this.profileService.getProfile();
+			const userProfileJson = JSON.stringify(profile);
+			const resumeDataJson = JSON.stringify(resumeResult.data);
+			const jobDescription = application.job_description ?? '';
+
+			// Resolve the resume PDF path (if available from the history entry)
+			let resumeFilePath = '';
+			const historyEntry = this.resumeHistoryService.getByApplicationId(application.id);
+			if (historyEntry?.pdf_path) {
+				const absolutePdf = path.join(process.cwd(), historyEntry.pdf_path);
+				if (fs.existsSync(absolutePdf)) {
+					resumeFilePath = absolutePdf;
+					this.log(runId, step, `Resume PDF available: ${historyEntry.pdf_path}`, 'progress');
+				} else {
+					this.log(runId, step, 'Resume PDF file not found on disk — skipping upload', 'warn');
+				}
+			} else {
+				this.log(runId, step, 'No resume PDF available — skipping upload', 'progress');
+			}
+
+			const requestContext = new RequestContext<JobApplicationRequestContext>();
+			requestContext.set('application-url', url);
+			requestContext.set('user-profile', userProfileJson);
+			requestContext.set('job-description', jobDescription);
+			requestContext.set('resume-data', resumeDataJson);
+			requestContext.set('resume-file-path', resumeFilePath);
+
 			this.checkCancelled(runId);
 
-			this.log(runId, step, 'Launching browser automation…', 'progress');
-			const result = await this.browserAgentService.fillApplicationForm(application.id);
+			// ── Run the agent ────────────────────────────────────────
+			this.log(runId, step, `Launching ${entry.site} application agent on: ${url}`, 'progress');
+
+			const agentStartAudit = this.auditLogService.start({
+				category: 'agent',
+				agent_id: entry.agentId,
+				title: `Application agent started: ${entry.site} → ${application.company}`,
+				meta: {
+					applicationId: application.id,
+					url,
+					site: entry.site,
+					agentId: entry.agentId,
+					hasResumePdf: !!resumeFilePath
+				}
+			});
+
+			const userMessage =
+				`IMPORTANT: Your FIRST action MUST be to call browser-open to navigate to the Application URL. ` +
+				`Do NOT return any result without first navigating to the page and taking a snapshot. ` +
+				`The browser session may already be logged in — do NOT assume the page is blocked. ` +
+				`Navigate to the application URL, inspect the actual page, then fill out and submit the job application form. ` +
+				`The job is "${application.title}" at "${application.company}".`;
+
+			let appResult: ApplicationResult;
+
+			try {
+				const agentResult = await agent.generate(userMessage, {
+					requestContext,
+					structuredOutput: { schema: applicationResultSchema }
+				});
+				appResult = agentResult.object;
+			} catch (firstError) {
+				const errMsg = firstError instanceof Error ? firstError.message : String(firstError);
+
+				// If the structured output validation failed (e.g. model returned an
+				// array instead of an object), retry with jsonPromptInjection which
+				// embeds the JSON schema directly into the prompt — smaller models
+				// handle this much better than tool-mode structured output.
+				if (
+					errMsg.includes('Structured output validation failed') ||
+					errMsg.includes('expected object') ||
+					errMsg.includes('expected string') ||
+					errMsg.includes('Invalid input')
+				) {
+					this.log(
+						runId,
+						step,
+						`Structured output parsing failed, retrying with JSON prompt injection: ${errMsg}`,
+						'warn'
+					);
+
+					agentStartAudit({
+						status: 'warning',
+						detail: `Structured output validation failed on first attempt, retrying with jsonPromptInjection`,
+						meta: { error: errMsg, retrying: true }
+					});
+
+					try {
+						const retryResult = await agent.generate(userMessage, {
+							requestContext,
+							structuredOutput: {
+								schema: applicationResultSchema,
+								jsonPromptInjection: true
+							}
+						});
+						appResult = retryResult.object;
+					} catch (retryError) {
+						const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
+
+						this.log(
+							runId,
+							step,
+							`Retry with JSON prompt injection also failed: ${retryMsg}`,
+							'warn'
+						);
+
+						// Last resort: try to extract JSON from the agent's text response
+						const extracted = this.tryExtractApplicationResult(retryError);
+						if (!extracted) {
+							agentStartAudit({
+								status: 'error',
+								detail: `Agent structured output failed after retry: ${retryMsg}`,
+								meta: { firstError: errMsg, retryError: retryMsg }
+							});
+							throw retryError;
+						}
+
+						appResult = extracted;
+
+						this.log(
+							runId,
+							step,
+							`Successfully extracted structured result from raw agent output`,
+							'progress'
+						);
+					}
+				} else {
+					agentStartAudit({
+						status: 'error',
+						detail: `Agent generate failed: ${errMsg}`,
+						meta: { error: errMsg }
+					});
+					throw firstError;
+				}
+			}
+
+			agentStartAudit({
+				status: appResult.blocked ? 'warning' : appResult.success ? 'success' : 'error',
+				detail: `Agent completed: success=${appResult.success}, submitted=${appResult.submitted}, blocked=${appResult.blocked}, fields_filled=${appResult.fields_filled}`,
+				meta: {
+					success: appResult.success,
+					submitted: appResult.submitted,
+					blocked: appResult.blocked,
+					fieldsFilled: appResult.fields_filled,
+					fieldsMissing: appResult.fields_missing,
+					errors: appResult.errors
+				}
+			});
 
 			this.checkCancelled(runId);
 
-			// Log all discovered form fields
-			if (result.completedFields.length > 0) {
-				this.log(runId, step, `Filled ${result.completedFields.length} form fields`, 'progress', {
-					fields: result.completedFields
+			this.log(
+				runId,
+				step,
+				`Agent completed: success=${appResult.success}, submitted=${appResult.submitted}, ` +
+					`fields_filled=${appResult.fields_filled}, fields_missing=${appResult.fields_missing}, ` +
+					`blocked=${appResult.blocked}`,
+				'progress'
+			);
+
+			// ── Log individual fields with their values ──────────────
+			const filledFields = appResult.fields.filter((f) => f.status === 'filled');
+			const missingFields = appResult.fields.filter(
+				(f) => f.status === 'missing' || f.status === 'error'
+			);
+
+			if (filledFields.length > 0) {
+				for (const field of filledFields) {
+					this.log(
+						runId,
+						step,
+						`Filled "${field.field_name}": ${field.value_used ?? '(set)'}`,
+						'progress'
+					);
+				}
+
+				this.log(runId, step, `Filled ${filledFields.length} form fields total`, 'progress', {
+					fields: filledFields.map((f) => ({
+						name: f.field_name,
+						type: f.field_type,
+						selector: f.selector,
+						value: f.value_used
+					}))
 				});
 
+				// Persist filled fields to the application record
 				const fieldEntries: Record<string, string> = {};
-				for (const fieldSelector of result.completedFields) {
-					fieldEntries[fieldSelector] = 'auto-filled';
+				for (const field of filledFields) {
+					fieldEntries[field.field_name] = field.value_used ?? '';
 				}
 				await this.applicationService.updateApplicationFields(application.id, fieldEntries);
+
+				// Save completed fields as a resource for auditability
+				this.resourceService.create({
+					applicationId: application.id,
+					resourceType: 'form_fields',
+					title: 'Completed Form Fields',
+					content: filledFields
+						.map((f) => `${f.field_name} (${f.field_type}): ${f.value_used ?? '(set)'}`)
+						.join('\n'),
+					meta: {
+						completedFields: filledFields.map((f) => ({
+							name: f.field_name,
+							type: f.field_type,
+							selector: f.selector,
+							value: f.value_used
+						}))
+					}
+				});
 			}
 
 			this.checkCancelled(runId);
 
-			// Log missing fields
-			if (result.missingFields.length > 0) {
-				this.log(runId, step, `${result.missingFields.length} fields could not be filled`, 'warn', {
-					missingFields: result.missingFields.map((f) => f.fieldName)
+			// ── Log missing / errored fields ─────────────────────────
+			if (missingFields.length > 0) {
+				this.log(runId, step, `${missingFields.length} field(s) could not be filled`, 'warn', {
+					missingFields: missingFields.map((f) => f.field_name)
 				});
 
 				this.resourceService.create({
 					applicationId: application.id,
 					resourceType: 'error',
-					title: 'Missing Form Fields',
-					content: result.missingFields
-						.map((f) => `${f.label} (${f.fieldType}) — ${f.required ? 'required' : 'optional'}`)
+					title: 'Missing / Errored Form Fields',
+					content: missingFields
+						.map(
+							(f) =>
+								`${f.field_name} (${f.field_type}) — ` +
+								`${f.is_required ? 'required' : 'optional'}: ` +
+								`${f.error_reason ?? f.status}`
+						)
 						.join('\n'),
-					meta: { missingFields: result.missingFields }
+					meta: { missingFields }
 				});
 			}
 
-			// Log errors
-			if (result.errors.length > 0) {
-				const errorSummary = result.errors.join('\n');
+			// ── Log blocked state ────────────────────────────────────
+			if (appResult.blocked) {
 				this.log(
 					runId,
 					step,
-					`Browser automation encountered ${result.errors.length} error(s)`,
-					'warn',
-					{
-						errors: result.errors
-					}
+					`Application blocked: ${appResult.blocked_reason ?? 'Unknown reason'}`,
+					'error'
 				);
 
 				this.resourceService.create({
 					applicationId: application.id,
 					resourceType: 'error',
-					title: 'Browser Automation Errors',
-					content: errorSummary,
-					meta: { errors: result.errors }
+					title: 'Application Blocked',
+					content: appResult.blocked_reason ?? 'The application was blocked',
+					meta: { blocked: true, blockedReason: appResult.blocked_reason }
 				});
-
-				if (!result.success) {
-					throw new Error(`Browser automation failed: ${errorSummary}`);
-				}
 			}
 
+			// ── Log errors from the agent ────────────────────────────
+			if (appResult.errors.length > 0) {
+				const errorSummary = appResult.errors.join('\n');
+				this.log(
+					runId,
+					step,
+					`Application agent encountered ${appResult.errors.length} error(s)`,
+					'warn',
+					{ errors: appResult.errors }
+				);
+
+				this.resourceService.create({
+					applicationId: application.id,
+					resourceType: 'error',
+					title: 'Application Errors',
+					content: errorSummary,
+					meta: { errors: appResult.errors }
+				});
+			}
+
+			// ── Log notes ────────────────────────────────────────────
+			if (appResult.notes) {
+				this.log(runId, step, `Agent notes: ${appResult.notes}`, 'progress');
+			}
+
+			// ── Determine outcome ────────────────────────────────────
+			const succeeded = appResult.success && appResult.submitted && !appResult.blocked;
+
+			if (!succeeded && !appResult.blocked && appResult.errors.length > 0) {
+				throw new Error(`Application agent failed: ${appResult.errors.join('; ')}`);
+			}
+
+			if (appResult.blocked) {
+				throw new Error(`Application blocked: ${appResult.blocked_reason ?? 'Unknown reason'}`);
+			}
+
+			// Close browser session
 			this.log(runId, step, 'Closing browser…', 'progress');
-			await this.browserAgentService.closeBrowser();
+			try {
+				await browserExec(['close']);
+			} catch {
+				/* best-effort */
+			}
 
 			this.pipelineService.completeStep(runId, step);
-			this.log(
-				runId,
-				step,
-				result.success
-					? `Application submitted: ${result.completedFields.length} fields filled`
-					: `Application attempted with ${result.missingFields.length} missing fields`,
-				'progress'
-			);
+
+			const resultSummary = succeeded
+				? `Application submitted to ${application.company}: ${appResult.fields_filled} fields filled`
+				: `Application attempted with ${appResult.fields_missing} missing fields`;
+
+			this.log(runId, step, resultSummary, 'progress');
 
 			finishStepAudit({
-				status: result.success ? 'success' : 'warning',
-				detail: result.success
-					? `Application submitted to ${application.company}: ${result.completedFields.length} fields filled`
-					: `Application attempted with ${result.missingFields.length} missing fields`,
+				status: succeeded ? 'success' : 'warning',
+				detail: resultSummary,
 				meta: {
-					completedFields: result.completedFields.length,
-					missingFields: result.missingFields.length,
-					errors: result.errors
+					agentId: entry.agentId,
+					site: entry.site,
+					success: appResult.success,
+					submitted: appResult.submitted,
+					blocked: appResult.blocked,
+					fieldsFilled: appResult.fields_filled,
+					fieldsMissing: appResult.fields_missing,
+					resumeUploaded: appResult.resume_uploaded,
+					coverLetterProvided: appResult.cover_letter_provided,
+					formPagesVisited: appResult.form_pages_visited,
+					errors: appResult.errors
 				}
 			});
 
-			return result;
+			return {
+				success: appResult.success,
+				submitted: appResult.submitted,
+				blocked: appResult.blocked,
+				blockedReason: appResult.blocked_reason,
+				fieldsFilled: appResult.fields_filled,
+				fieldsMissing: appResult.fields_missing,
+				resumeUploaded: appResult.resume_uploaded,
+				coverLetterProvided: appResult.cover_letter_provided,
+				formPagesVisited: appResult.form_pages_visited,
+				fields: appResult.fields,
+				errors: appResult.errors,
+				notes: appResult.notes,
+				screenshotTaken: appResult.screenshot_taken
+			};
 		} catch (error) {
 			if (error instanceof CancellationError) {
 				// Best-effort browser cleanup on cancel
 				try {
-					await this.browserAgentService.closeBrowser();
+					await browserExec(['close']);
 				} catch {
 					/* ignore */
 				}
@@ -1247,7 +1581,7 @@ export class ApplyPipelineExecutor {
 
 			// Ensure browser is closed on failure
 			try {
-				await this.browserAgentService.closeBrowser();
+				await browserExec(['close']);
 			} catch {
 				/* ignore */
 			}
@@ -1259,6 +1593,60 @@ export class ApplyPipelineExecutor {
 				detail: `Apply step failed: ${message}`
 			});
 			throw new Error(`Apply step failed: ${message}`);
+		}
+	}
+
+	// ── Helpers ──────────────────────────────────────────────────────
+
+	/**
+	 * Last-resort attempt to extract an ApplicationResult from an error
+	 * that contains the agent's raw text response.
+	 *
+	 * Some models return valid JSON but wrapped in an array `[{...}]` or
+	 * embedded in markdown code blocks. This method tries common patterns.
+	 */
+	private tryExtractApplicationResult(error: unknown): ApplicationResult | null {
+		try {
+			// Check if the error has a details.value property with the raw JSON
+			const errAny = error as Record<string, unknown>;
+			const details = errAny?.details as Record<string, unknown> | undefined;
+			let rawValue = details?.value as string | undefined;
+
+			// Also check the error cause chain
+			if (!rawValue && error instanceof Error) {
+				const cause = (error as { cause?: { details?: { value?: string } } }).cause;
+				rawValue = cause?.details?.value;
+			}
+
+			if (!rawValue) return null;
+
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(rawValue);
+			} catch {
+				// Try to extract JSON from markdown code blocks
+				const jsonMatch = rawValue.match(/```(?:json)?\s*([\s\S]*?)```/);
+				if (jsonMatch) {
+					parsed = JSON.parse(jsonMatch[1].trim());
+				} else {
+					return null;
+				}
+			}
+
+			// If the model returned an array, take the first element
+			if (Array.isArray(parsed) && parsed.length > 0) {
+				parsed = parsed[0];
+			}
+
+			// Validate against the schema
+			const result = applicationResultSchema.safeParse(parsed);
+			if (result.success) {
+				return result.data;
+			}
+
+			return null;
+		} catch {
+			return null;
 		}
 	}
 }

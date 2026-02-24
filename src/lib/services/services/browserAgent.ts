@@ -71,9 +71,18 @@ export interface MissingField {
 	fieldType: string;
 }
 
+export interface CompletedField {
+	/** CSS selector or field name used to locate the element */
+	selector: string;
+	/** The value that was filled into the field */
+	value: string;
+	/** Human-readable label for the field (if discovered) */
+	label?: string;
+}
+
 export interface BrowserAutomationResult {
 	success: boolean;
-	completedFields: string[];
+	completedFields: CompletedField[];
 	missingFields: MissingField[];
 	errors: string[];
 	screenshot?: string;
@@ -186,17 +195,17 @@ export class BrowserAgentService {
 			await this.navigateToApplication(application.job_description_url);
 			const profile = await this.profileService.getProfile();
 
-			const fieldMappings: Record<string, keyof ProfileData> = {
-				'#first-name': 'name', // Will need splitting
-				'#last-name': 'name', // Will need splitting
-				'#email': 'email',
-				'#phone': 'phone',
-				'#location': 'location',
-				'#linkedin-url': 'linkedin_url',
-				'#portfolio-url': 'portfolio_url'
+			const fieldMappings: Record<string, { profileKey: keyof ProfileData; label: string }> = {
+				'#first-name': { profileKey: 'name', label: 'First Name' },
+				'#last-name': { profileKey: 'name', label: 'Last Name' },
+				'#email': { profileKey: 'email', label: 'Email' },
+				'#phone': { profileKey: 'phone', label: 'Phone' },
+				'#location': { profileKey: 'location', label: 'Location' },
+				'#linkedin-url': { profileKey: 'linkedin_url', label: 'LinkedIn URL' },
+				'#portfolio-url': { profileKey: 'portfolio_url', label: 'Portfolio URL' }
 			};
 
-			for (const [selector, profileKey] of Object.entries(fieldMappings)) {
+			for (const [selector, { profileKey, label }] of Object.entries(fieldMappings)) {
 				let value = profile[profileKey] as string | undefined;
 				if (value) {
 					if (profileKey === 'name') {
@@ -204,7 +213,7 @@ export class BrowserAgentService {
 						value = selector.includes('first') ? nameParts[0] : nameParts.slice(1).join(' ');
 					}
 					if (await this.fillField(selector, value)) {
-						result.completedFields.push(selector);
+						result.completedFields.push({ selector, value, label });
 					}
 				}
 			}

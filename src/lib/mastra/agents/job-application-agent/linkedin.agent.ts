@@ -1,10 +1,7 @@
 import { browserTools } from '../../tools/browser';
-import { withToolLoggingAll } from '../../tools/with-logging';
+import { withToolLoggingAll, type ToolLoggingOptions } from '../../tools/with-logging';
 import { createAgent } from '../create-agent';
-import {
-	jobApplicationRequestContextSchema,
-	type JobApplicationRequestContext
-} from './types';
+import { jobApplicationRequestContextSchema, type JobApplicationRequestContext } from './types';
 
 /**
  * Creates a LinkedIn-specific job application sub-agent.
@@ -43,7 +40,7 @@ import {
  * });
  * ```
  */
-export function createLinkedInApplicationAgent() {
+export function createLinkedInApplicationAgent(toolLogging?: ToolLoggingOptions) {
 	return createAgent({
 		id: 'job-application-agent.linkedin',
 		name: 'LinkedIn Job Application Agent',
@@ -56,7 +53,7 @@ export function createLinkedInApplicationAgent() {
 			'Resume File Path': `\`${requestContext.get('resume-file-path') as JobApplicationRequestContext['resume-file-path']}\``
 		}),
 		tools: {
-			...withToolLoggingAll(browserTools)
+			...withToolLoggingAll(browserTools, toolLogging)
 		}
 	});
 }

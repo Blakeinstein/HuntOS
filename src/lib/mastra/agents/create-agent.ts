@@ -3,6 +3,7 @@ import { Agent } from '@mastra/core/agent';
 import type { AgentConfig, ToolsInput } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
 import { Memory } from '@mastra/memory';
+import { LibSQLStore } from '@mastra/libsql';
 import { OPENROUTER_API_KEY } from '$env/static/private';
 import { promptRegistry } from '../prompts/load';
 
@@ -88,7 +89,12 @@ export function createAgent({
 	dynamicContext,
 	...rest
 }: CreateAgentOptions): Agent {
-	const memory = new Memory();
+	const memory = new Memory({
+		storage: new LibSQLStore({
+			id: 'agent-memory-storage',
+			url: 'file:./data/memory.db'
+		})
+	});
 	const resolvedModel = openrouter(model ?? DEFAULT_MODEL);
 
 	// When dynamicContext is provided, instructions become a function that

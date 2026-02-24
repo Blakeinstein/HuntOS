@@ -3,6 +3,7 @@ import { ApplicationSubAgentRegistry } from './registry';
 import { createLinkedInApplicationAgent } from './linkedin.agent';
 import { createGreenhouseApplicationAgent } from './greenhouse.agent';
 import { createGenericApplicationAgent } from './generic.agent';
+import type { ToolLoggingOptions } from '../../tools/with-logging';
 import {
 	applicationRoutingDecisionSchema,
 	jobApplicationRequestContextSchema,
@@ -23,7 +24,9 @@ import {
  * const agent = entry.create(); // Greenhouse-specific application agent
  * ```
  */
-export function createApplicationSubAgentRegistry(): ApplicationSubAgentRegistry {
+export function createApplicationSubAgentRegistry(
+	toolLogging?: ToolLoggingOptions
+): ApplicationSubAgentRegistry {
 	const registry = new ApplicationSubAgentRegistry();
 
 	registry
@@ -31,19 +34,19 @@ export function createApplicationSubAgentRegistry(): ApplicationSubAgentRegistry
 			site: 'LinkedIn',
 			agentId: 'job-application-agent.linkedin',
 			match: (url) => /linkedin\.com/i.test(url),
-			create: () => createLinkedInApplicationAgent()
+			create: () => createLinkedInApplicationAgent(toolLogging)
 		})
 		.register({
 			site: 'Greenhouse',
 			agentId: 'job-application-agent.greenhouse',
 			match: (url) => /greenhouse\.io/i.test(url),
-			create: () => createGreenhouseApplicationAgent()
+			create: () => createGreenhouseApplicationAgent(toolLogging)
 		})
 		.register({
 			site: 'Generic',
 			agentId: 'job-application-agent.generic',
 			match: () => true, // catch-all fallback — always matches
-			create: () => createGenericApplicationAgent()
+			create: () => createGenericApplicationAgent(toolLogging)
 		});
 
 	return registry;

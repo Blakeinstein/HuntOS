@@ -16,7 +16,8 @@
 		BanIcon,
 		InfoIcon,
 		AlertCircleIcon,
-		MessageSquareIcon
+		MessageSquareIcon,
+		ClipboardListIcon
 	} from '@lucide/svelte';
 	import type {
 		PipelineRun,
@@ -295,6 +296,8 @@
 				return FileTextIcon;
 			case 'error':
 				return AlertTriangleIcon;
+			case 'form_fields':
+				return ClipboardListIcon;
 			default:
 				return FileTextIcon;
 		}
@@ -312,6 +315,8 @@
 				return 'bg-success-500/15 text-success-500';
 			case 'error':
 				return 'bg-error-500/15 text-error-500';
+			case 'form_fields':
+				return 'bg-warning-500/15 text-warning-500';
 			default:
 				return 'bg-surface-500/15 text-surface-500';
 		}

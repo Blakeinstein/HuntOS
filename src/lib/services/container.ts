@@ -20,6 +20,7 @@ import { ApplicationPipelineService } from '$lib/services/services/applicationPi
 import { ApplyPipelineExecutor } from '$lib/services/services/applyPipelineExecutor';
 import type { Mastra } from '@mastra/core';
 import type { SubAgentRegistry } from '$lib/mastra/agents/job-board-agent/registry';
+import type { ApplicationSubAgentRegistry } from '$lib/mastra/agents/job-application-agent/registry';
 
 export interface ServiceContainer {
 	applicationService: ApplicationService;
@@ -47,7 +48,11 @@ export interface ServiceContainer {
 	 * Call this once after both `createServices()` and `new Mastra()` have run
 	 * to break the circular dependency between the service container and Mastra.
 	 */
-	withMastra(mastra: Mastra, subAgentRegistry: SubAgentRegistry): void;
+	withMastra(
+		mastra: Mastra,
+		subAgentRegistry: SubAgentRegistry,
+		applicationSubAgentRegistry: ApplicationSubAgentRegistry
+	): void;
 }
 
 export function createServices(db: Database): ServiceContainer {
@@ -106,7 +111,11 @@ export function createServices(db: Database): ServiceContainer {
 		applicationPipelineService,
 		applyPipelineExecutor,
 
-		withMastra(mastra: Mastra, subAgentRegistry: SubAgentRegistry) {
+		withMastra(
+			mastra: Mastra,
+			subAgentRegistry: SubAgentRegistry,
+			applicationSubAgentRegistry: ApplicationSubAgentRegistry
+		) {
 			container.jobBoardScraperService = new JobBoardScraperService(
 				mastra,
 				profileService,
@@ -114,6 +123,8 @@ export function createServices(db: Database): ServiceContainer {
 				subAgentRegistry,
 				auditLogService
 			);
+			applyPipelineExecutor.setApplicationSubAgentRegistry(applicationSubAgentRegistry);
+			applyPipelineExecutor.setMastra(mastra);
 		}
 	};
 

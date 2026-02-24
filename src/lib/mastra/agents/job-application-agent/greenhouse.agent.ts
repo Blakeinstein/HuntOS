@@ -1,10 +1,7 @@
 import { browserTools } from '../../tools/browser';
-import { withToolLoggingAll } from '../../tools/with-logging';
+import { withToolLoggingAll, type ToolLoggingOptions } from '../../tools/with-logging';
 import { createAgent } from '../create-agent';
-import {
-	jobApplicationRequestContextSchema,
-	type JobApplicationRequestContext
-} from './types';
+import { jobApplicationRequestContextSchema, type JobApplicationRequestContext } from './types';
 
 /**
  * Creates a Greenhouse ATS-specific job application sub-agent.
@@ -50,7 +47,7 @@ import {
  * });
  * ```
  */
-export function createGreenhouseApplicationAgent() {
+export function createGreenhouseApplicationAgent(toolLogging?: ToolLoggingOptions) {
 	return createAgent({
 		id: 'job-application-agent.greenhouse',
 		name: 'Greenhouse Job Application Agent',
@@ -63,7 +60,7 @@ export function createGreenhouseApplicationAgent() {
 			'Resume File Path': `\`${requestContext.get('resume-file-path') as JobApplicationRequestContext['resume-file-path']}\``
 		}),
 		tools: {
-			...withToolLoggingAll(browserTools)
+			...withToolLoggingAll(browserTools, toolLogging)
 		}
 	});
 }

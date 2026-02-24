@@ -46,15 +46,44 @@ const linkedInAgent = createLinkedInAgent();
 const greenhouseAgent = createGreenhouseAgent();
 const genericAgent = createGenericAgent();
 
+// Shared tool-call audit callback — routes every browser tool invocation
+// to the audit_logs table so individual tool calls are visible in the UI.
+const toolAuditCallback = {
+	onToolCall: (evt: import('./tools/with-logging').ToolCallEvent) => {
+		services.auditLogService.create({
+			category: 'browser',
+			agent_id: 'job-application-agent',
+			status: evt.success ? 'success' : 'error',
+			title: `Tool: ${evt.toolId}`,
+			detail: evt.success
+				? `${evt.toolId}(${Object.entries(evt.input)
+						.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+						.join(
+							', '
+						)}) → ${typeof evt.output === 'object' ? JSON.stringify(evt.output) : String(evt.output)}`.slice(
+						0,
+						500
+					)
+				: `${evt.toolId} failed: ${evt.error}`,
+			duration_ms: evt.durationMs,
+			meta: {
+				input: evt.input,
+				...(evt.output ? { output: evt.output } : {}),
+				...(evt.error ? { error: evt.error } : {})
+			}
+		});
+	}
+};
+
 // Job application sub-agents — responsible for filling out and submitting applications
 const jobApplicationAgent = createJobApplicationAgent();
-const linkedInApplicationAgent = createLinkedInApplicationAgent();
-const greenhouseApplicationAgent = createGreenhouseApplicationAgent();
-const genericApplicationAgent = createGenericApplicationAgent();
+const linkedInApplicationAgent = createLinkedInApplicationAgent(toolAuditCallback);
+const greenhouseApplicationAgent = createGreenhouseApplicationAgent(toolAuditCallback);
+const genericApplicationAgent = createGenericApplicationAgent(toolAuditCallback);
 
 // Sub-agent registries for URL-based routing at runtime
 const subAgentRegistry = createJobBoardSubAgentRegistry();
-const applicationSubAgentRegistry = createApplicationSubAgentRegistry();
+const applicationSubAgentRegistry = createApplicationSubAgentRegistry(toolAuditCallback);
 
 export const mastra = new Mastra({
 	agents: {
@@ -91,6 +120,6 @@ export const mastra = new Mastra({
 });
 
 // Wire late-bound services that depend on the Mastra instance
-services.withMastra(mastra, subAgentRegistry);
+services.withMastra(mastra, subAgentRegistry, applicationSubAgentRegistry);
 
 export { services, subAgentRegistry, applicationSubAgentRegistry };

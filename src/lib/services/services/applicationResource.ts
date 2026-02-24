@@ -7,7 +7,8 @@ export type ResourceType =
 	| 'company_info'
 	| 'role_research'
 	| 'resume'
-	| 'error';
+	| 'error'
+	| 'form_fields';
 
 export interface ApplicationResource {
 	id: number;
