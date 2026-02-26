@@ -10,7 +10,8 @@
 // key checkpoints and throws a CancellationError to abort cleanly.
 //
 // On success the application is moved to "Applied".
-// On failure the application is moved to "Action Required".
+// On job closed (no longer accepting applications) the application is moved to "Rejected".
+// On other failures the application is moved to "Action Required".
 // On cancel the application stays in "Backlog".
 //
 // Resume-from-step: When a pipeline fails the user can retry from the
@@ -93,6 +94,21 @@ class CancellationError extends Error {
 	constructor() {
 		super('Pipeline cancelled by user');
 		this.name = 'CancellationError';
+	}
+}
+
+/**
+ * Error thrown when the job application cannot proceed because:
+ * - The job is no longer accepting applications (closed)
+ * - You've already applied to this position (already_applied)
+ *
+ * This is a terminal state - the application should be moved to "Rejected"
+ * rather than "Action Required" since there's nothing the user can do.
+ */
+class ApplicationClosedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ApplicationClosedError';
 	}
 }
 
@@ -713,6 +729,46 @@ export class ApplyPipelineExecutor {
 				});
 
 				return { success: false, pipelineRunId: runId, error: 'Cancelled by user' };
+			}
+
+			// ── Job no longer accepting applications ────────────────
+			if (error instanceof ApplicationClosedError) {
+				const message = error.message;
+				const currentStep = this.pipelineService.getById(runId)?.current_step ?? 'apply';
+
+				this.log(runId, currentStep, `Application closed: ${message}`, 'warn');
+
+				// Log as a resource for auditability
+				this.resourceService.create({
+					applicationId,
+					resourceType: 'error',
+					title: 'Application Closed - No Further Action Possible',
+					content: message,
+					meta: {
+						pipelineRunId: runId,
+						step: currentStep,
+						closedReason: message
+					}
+				});
+
+				// Move to Rejected swimlane
+				const rejectedSwimlane = await this.findSwimlaneByName('Rejected');
+				if (rejectedSwimlane) {
+					await this.applicationService.moveApplication(
+						applicationId,
+						rejectedSwimlane,
+						`Application closed: ${message}`,
+						'system'
+					);
+				}
+
+				finishAudit({
+					status: 'warning',
+					detail: `Application closed for ${application.company}: ${message}`,
+					meta: { applicationId, pipelineRunId: runId, closed: true }
+				});
+
+				return { success: false, pipelineRunId: runId, error: message };
 			}
 
 			// ── Failure ─────────────────────────────────────────────
@@ -1477,8 +1533,23 @@ export class ApplyPipelineExecutor {
 				this.log(runId, step, `Agent notes: ${appResult.notes}`, 'progress');
 			}
 
-			// ── Determine outcome ────────────────────────────────────
+			// ── Determine outcome based on end_reason from LLM ───────
 			const succeeded = appResult.success && appResult.submitted && !appResult.blocked;
+			const endReason = appResult.end_reason;
+
+			// Handle job closed (no longer accepting applications)
+			if (endReason === 'closed') {
+				const closedReason =
+					appResult.end_reason_description ?? 'The job is no longer accepting applications';
+				throw new ApplicationClosedError(closedReason);
+			}
+
+			// Handle already applied
+			if (endReason === 'already_applied') {
+				const alreadyAppliedReason =
+					appResult.end_reason_description ?? 'You have already applied to this position';
+				throw new ApplicationClosedError(alreadyAppliedReason);
+			}
 
 			if (!succeeded && !appResult.blocked && appResult.errors.length > 0) {
 				throw new Error(`Application agent failed: ${appResult.errors.join('; ')}`);

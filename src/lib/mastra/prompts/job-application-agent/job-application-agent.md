@@ -310,20 +310,79 @@ After completing (or failing) the application attempt, return a JSON object with
   "blocked_reason": null,
   "errors": [],
   "notes": "Multi-step form with 3 pages. All standard fields filled. One custom question about visa sponsorship could not be answered.",
+  "end_reason": "success",
+  "end_reason_description": "Application submitted successfully after filling all required fields.",
   "screenshot_taken": true
 }
 ```
 
 #### On Failure
 
-If the application cannot be completed, return:
+If the application cannot be completed, you MUST include `end_reason` and `end_reason_description` to explain why:
+
+| end_reason | When to use | Description |
+|------------|-------------|-------------|
+| `closed` | Job no longer accepting applications | Use when the posting shows "No longer accepting applications", "Position filled", "Job closed", etc. |
+| `already_applied` | You've already applied to this position | Use when the page shows "Already applied", "Applied", etc. |
+| `blocked` | Authentication/CAPTCHA issues | Use for login walls, CAPTCHAs, or other access blocks |
+| `error` | Other failures | Use for unexpected errors that aren't covered above |
+
+Example - Job Closed:
 
 ```json
 {
   "success": false,
   "source_url": "https://example.com/jobs/123/apply",
   "applied_at": "2025-01-15T14:30:00Z",
-  "form_pages_visited": 1,
+  "form_pages_visited": 0,
+  "fields": [],
+  "fields_filled": 0,
+  "fields_missing": 0,
+  "resume_uploaded": false,
+  "cover_letter_provided": false,
+  "submitted": false,
+  "blocked": false,
+  "blocked_reason": null,
+  "errors": [],
+  "notes": null,
+  "end_reason": "closed",
+  "end_reason_description": "The job posting is no longer accepting applications. The page displayed: 'This position has been filled.' No further action can be taken.",
+  "screenshot_taken": true
+}
+```
+
+Example - Already Applied:
+
+```json
+{
+  "success": false,
+  "source_url": "https://example.com/jobs/123/apply",
+  "applied_at": "2025-01-15T14:30:00Z",
+  "form_pages_visited": 0,
+  "fields": [],
+  "fields_filled": 0,
+  "fields_missing": 0,
+  "resume_uploaded": false,
+  "cover_letter_provided": false,
+  "submitted": false,
+  "blocked": false,
+  "blocked_reason": null,
+  "errors": [],
+  "notes": null,
+  "end_reason": "already_applied",
+  "end_reason_description": "You have already applied to this position. The page shows an 'Applied' status button.",
+  "screenshot_taken": true
+}
+```
+
+Example - Blocked (Login Required):
+
+```json
+{
+  "success": false,
+  "source_url": "https://example.com/jobs/123/apply",
+  "applied_at": "2025-01-15T14:30:00Z",
+  "form_pages_visited": 0,
   "fields": [],
   "fields_filled": 0,
   "fields_missing": 0,
@@ -334,6 +393,8 @@ If the application cannot be completed, return:
   "blocked_reason": "Login required — redirected to sign-in page",
   "errors": ["Cannot proceed without authentication"],
   "notes": "The application page requires login. Moving to Action Required for manual completion.",
+  "end_reason": "blocked",
+  "end_reason_description": "The application page requires authentication. The page redirected to a login form and cannot be accessed without logging in.",
   "screenshot_taken": true
 }
 ```

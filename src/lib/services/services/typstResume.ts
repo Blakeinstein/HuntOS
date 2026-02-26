@@ -244,9 +244,9 @@ export class TypstResumeService {
 			}
 		}
 
-		// Projects
+		// Projects - Always include this key, even if empty
+		lines.push('projects:');
 		if (data.projects && data.projects.length > 0) {
-			lines.push('projects:');
 			for (const proj of data.projects) {
 				lines.push(`  - name: ${this.yamlString(proj.name)}`);
 				lines.push(`    skills: ${this.yamlString(proj.skills)}`);

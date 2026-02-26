@@ -17,6 +17,9 @@ export interface BrowserExecResult {
 /**
  * Execute an agent-browser CLI command, automatically connecting via CDP.
  *
+ * Uses the `ab` alias (bun ab) instead of bunx agent-browser for better performance.
+ * The browser persists via a background daemon, so commands are efficient.
+ *
  * @param args - The command arguments (e.g. ['open', 'https://example.com'])
  * @param options - Optional overrides
  * @returns The combined stdout/stderr and success flag
@@ -30,7 +33,7 @@ export async function browserExec(
 	const fullArgs = ['--cdp', cdpPort, ...(json ? ['--json'] : []), ...args];
 
 	try {
-		const { stdout, stderr } = await execFileAsync('bunx', ['agent-browser', ...fullArgs], {
+		const { stdout, stderr } = await execFileAsync('bun', ['ab', ...fullArgs], {
 			timeout,
 			maxBuffer: 10 * 1024 * 1024, // 10 MB for screenshots / snapshots
 			env: { ...process.env }

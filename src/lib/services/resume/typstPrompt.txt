@@ -36,17 +36,7 @@ Here is the structured JSON format to follow:
             ]
         }
     ],
-    "projects": [
-        {
-            "name": "Project Name",
-            "skills": "Python, Flask, React, PostgreSQL",
-            "date": "Jun. 2020 - Present",
-            "points": [
-                "Built a full-stack web application serving 1K+ daily active users",
-                "Implemented OAuth2 authentication flow with GitHub provider"
-            ]
-        }
-    ],
+    "projects": [],
     "skills": [
         {
             "category": "Languages",
@@ -79,8 +69,9 @@ Here is the structured JSON format to follow:
 - **The `skills` field in `projects` is a single comma-separated string, NOT an array.**
 - **The `skills` array at the top level groups skills by category. Each entry has a `category` (string) and `skills` (comma-separated string).**
 - **Order experience and education entries with the most recent first.**
-- **Keep bullet points concise — one line each, no sub-bullets.**
-- **Omit the `projects` array entirely if there are no relevant projects to include.**
+- **If the profile contains project information (even if unstructured), extract and format it into the `projects` array** with name, skills, date, and points fields. If you cannot find any project-related content in the input, use an empty array instead of omitting the key.
+- **Always include a `projects` field in the output** - use an empty array `[]` if there are no projects to list. Do not omit this key from the JSON structure.
 - **Include 3-6 bullet points per experience entry, focusing on measurable impact.**
+- **For projects that appear in the profile but lack structured details (like skills or dates), use reasonable defaults such as "TBD" for missing fields rather than skipping them entirely.**
 
 Now, generate the JSON output.

@@ -109,12 +109,37 @@ export const applicationResultSchema = z.object({
 		.describe(
 			'Additional agent notes about the application attempt (unusual form layout, multi-step process, etc.)'
 		),
+	end_reason: z
+		.enum(['success', 'blocked', 'closed', 'already_applied', 'error', 'cancelled'])
+		.nullable()
+		.optional()
+		.describe(
+			'The final outcome reason. Use "closed" when the job is no longer accepting applications, "already_applied" if you\'ve already applied, "blocked" for authentication/CAPTCHA issues, "error" for other failures.'
+		),
+	end_reason_description: z
+		.string()
+		.nullable()
+		.optional()
+		.describe(
+			'A detailed explanation of why the application process ended, including specific reasons like "Job posting closed by employer" or "Already applied to this position".'
+		),
 	screenshot_taken: z
 		.boolean()
 		.describe('Whether a screenshot was captured at the end of the attempt')
 });
 
 export type ApplicationResult = z.infer<typeof applicationResultSchema>;
+
+// ── End Reason Enum ─────────────────────────────────────────────────
+
+/**
+ * The end reason for an application attempt.
+ */
+export const applicationEndReasonEnum = z
+	.enum(['success', 'blocked', 'closed', 'already_applied', 'error', 'cancelled'])
+	.describe('The final outcome reason of an application attempt');
+
+export type ApplicationEndReason = z.infer<typeof applicationEndReasonEnum>;
 
 // ── Request Context ─────────────────────────────────────────────────
 

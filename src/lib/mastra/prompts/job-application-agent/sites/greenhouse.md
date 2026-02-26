@@ -22,8 +22,8 @@ After navigating and taking a snapshot, check for these Greenhouse-specific cond
 
 - **Embedded iframe:** If the Greenhouse form is embedded in a company's custom career page via an `<iframe>`, call `browser-frame-switch` with `selector: "iframe#grnhse_iframe"` (or `"iframe[src*='greenhouse.io']"`, `"iframe[title*='Greenhouse']"`). Then call `browser-snapshot` to see the form fields inside the frame.
 - **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser-find-text { text: "Accept", action: "click" }` or `browser-find-role { role: "button", name: "Close", action: "click" }`. Re-take `browser-snapshot`.
-- **"No longer accepting applications":** If the page shows "This job is no longer accepting applications" or a similar closed-position message, STOP. Return `success: false` with the error message.
-- **404 or error page:** If the page shows a 404, "Job not found", or server error, STOP. Return `success: false`.
+- **"No longer accepting applications":** If the page shows "This job is no longer accepting applications", "Position filled", "Job closed", or a similar closed-position message, STOP. Return `success: false`, `end_reason: "closed"`, and `end_reason_description` explaining the specific reason (e.g., "The job posting is no longer accepting applications").
+- **404 or error page:** If the page shows a 404, "Job not found", or server error, STOP. Return `success: false`, `end_reason: "error"`, and `end_reason_description` explaining the issue.
 - **Login/authentication wall:** Greenhouse forms are almost never gated behind login. If **the snapshot shows** a login form or authentication wall, STOP and return `blocked: true` with `blocked_reason: "Authentication required"`.
 - **CAPTCHA:** If a CAPTCHA challenge is detected, STOP immediately. Return `blocked: true` with `blocked_reason: "CAPTCHA detected"`.
 

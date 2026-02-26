@@ -2,6 +2,23 @@
 
 The detected application site is **LinkedIn**. Apply the following LinkedIn-specific guidance in addition to the base instructions above.
 
+### Initial Navigation and Page State Detection
+
+When launched on a LinkedIn URL, you may be directed to either:
+- A job search results page (e.g., `linkedin.com/jobs/search?...`)
+- A specific job posting view (e.g., `linkedin.com/jobs/view/4368080056/`)
+
+**CRITICAL FIRST STEPS:**
+1. Call `browser-open` with the provided URL (even if it looks like a LinkedIn page â€” don't assume state).
+2. Call `browser-wait-load { state: "networkidle" }`.
+3. Call `browser-get-url` to confirm you're on the expected domain.
+4. Call `browser-snapshot` to see the actual page content and determine:
+   - Are you on a job search results page or a specific job posting?
+   - Is there a login wall, CAPTCHA, or error message?
+   - Does the page say "No longer accepting applications" or "Already applied"?
+
+**If launched on a job search URL but need to apply to a specific job:** Use `browser-find-text { text: "Easy Apply", action: "click" }` or click on a job card link to navigate to the job posting.
+
 ### LinkedIn Application Flows
 
 LinkedIn has two primary application flows. You must detect which one applies and handle it accordingly:
@@ -31,9 +48,10 @@ Some LinkedIn postings link to the company's own career page or ATS. When you cl
 After navigating and taking a snapshot, check for these LinkedIn-specific conditions:
 
 - **Login wall:** If **the snapshot shows** a sign-in form, a "Sign in to apply" prompt, or the URL has redirected to `linkedin.com/login`, STOP. Return `blocked: true` with `blocked_reason: "LinkedIn login required"`. Do NOT attempt to log in.
-- **"Application no longer available":** If the posting shows "No longer accepting applications", "This job is no longer available", or similar, STOP. Return `success: false` with the error message.
+- **"Application no longer available":** If the posting shows "No longer accepting applications", "This job is no longer available", "Position filled", or similar, STOP. Return `success: false`, `end_reason: "closed"`, and `end_reason_description` explaining the specific reason (e.g., "The job posting is no longer accepting applications").
 - **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser-find-text { text: "Accept", action: "click" }` or `browser-find-role { role: "button", name: "Reject non-essential", action: "click" }`. Re-take `browser-snapshot`.
-- **"Already applied" indicator:** If LinkedIn shows "Applied" or "You've already applied", STOP. Return `success: false` with `errors: ["Already applied to this position"]`.
+- **"Already applied" indicator:** If LinkedIn shows "Applied" or "You've already applied", STOP. Return `success: false`, `end_reason: "already_applied"`, and `end_reason_description` explaining that you've already applied.
+- **Job not found / 404 error:** If the page shows "Page not found", "The job posting no longer exists", or similar, STOP. Return `success: false`, `end_reason: "closed"`, with explanation.
 
 ### Locating and Clicking the Apply Button
 
@@ -214,3 +232,5 @@ These selectors are known patterns for LinkedIn's job application UI as of 2024â
 - **Be efficient.** LinkedIn Easy Apply is designed to be quick. Most applications should complete in under 60 seconds of interaction time. Don't over-think simple fields.
 - **Verify pre-filled fields.** LinkedIn often pre-fills contact info. Use `browser-get-value` to verify pre-filled values match the user profile before advancing.
 - **Handle external tab switches properly.** If the apply button opens a new tab, call `browser-tab-list` then `browser-tab-switch` to follow the redirect.
+- **Always start by navigating.** Even if you're already on LinkedIn, always call `browser-open` with the target URL first. The browser session state may have changed.
+- **Detect page state early.** After initial navigation and snapshot, immediately check for login walls, closed jobs, or "already applied" states before attempting to fill forms.
