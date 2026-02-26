@@ -1,40 +1,35 @@
 /**
  * Job Application Agent — barrel export.
  *
- * Re-exports the orchestrator agent factory (the top-level entry point),
- * the sub-agent registry with all registered site-specific agents,
- * and shared types/schemas used across the job-application-agent family.
+ * Exports the unified job application agent factory, the site-instructions
+ * resolver for dynamic context injection, and shared types/schemas.
+ *
+ * The previous multi-agent architecture (orchestrator + site-specific
+ * sub-agents + registry) has been replaced by a single central agent
+ * that receives site-specific instructions via dynamic context.
  */
 
-// ── Orchestrator ────────────────────────────────────────────────────
-export {
-	createJobApplicationAgent,
-	createApplicationSubAgentRegistry
-} from './orchestrator.agent';
+// ── Agent ───────────────────────────────────────────────────────────
+export { createJobApplicationAgent } from './agent';
 
-// ── Sub-agents ──────────────────────────────────────────────────────
-export { createLinkedInApplicationAgent } from './linkedin.agent';
-export { createGreenhouseApplicationAgent } from './greenhouse.agent';
-export { createGenericApplicationAgent } from './generic.agent';
-
-// ── Registry ────────────────────────────────────────────────────────
+// ── Site Instructions ───────────────────────────────────────────────
 export {
-	ApplicationSubAgentRegistry,
-	type ApplicationSubAgentEntry
-} from './registry';
+	resolveSiteInstructions,
+	identifySite,
+	loadSiteInstructions,
+	listKnownSites,
+	clearSiteInstructionCache,
+	type SiteMatch
+} from './site-instructions';
 
 // ── Types & Schemas ─────────────────────────────────────────────────
 export {
 	applicationResultSchema,
 	applicationFieldSchema,
-	applicationRoutingDecisionSchema,
 	jobApplicationRequestContextSchema,
 	fieldStatusEnum,
-	APPLICATION_SITE_AGENT_MAP,
 	type ApplicationResult,
 	type ApplicationField,
-	type ApplicationRoutingDecision,
 	type JobApplicationRequestContext,
-	type FieldStatus,
-	type ApplicationSiteId
+	type FieldStatus
 } from './types';

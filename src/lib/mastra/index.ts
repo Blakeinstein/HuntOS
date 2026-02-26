@@ -15,13 +15,7 @@ import {
 	createGreenhouseAgent,
 	createGenericAgent
 } from './agents/job-board-agent/index';
-import {
-	createJobApplicationAgent,
-	createApplicationSubAgentRegistry,
-	createLinkedInApplicationAgent,
-	createGreenhouseApplicationAgent,
-	createGenericApplicationAgent
-} from './agents/job-application-agent/index';
+import { createJobApplicationAgent } from './agents/job-application-agent/index';
 import { logger } from './logger';
 
 const services = createServices(db);
@@ -75,15 +69,11 @@ const toolAuditCallback = {
 	}
 };
 
-// Job application sub-agents — responsible for filling out and submitting applications
-const jobApplicationAgent = createJobApplicationAgent();
-const linkedInApplicationAgent = createLinkedInApplicationAgent(toolAuditCallback);
-const greenhouseApplicationAgent = createGreenhouseApplicationAgent(toolAuditCallback);
-const genericApplicationAgent = createGenericApplicationAgent(toolAuditCallback);
+// Unified job application agent — handles all sites with dynamic site-specific context
+const jobApplicationAgent = createJobApplicationAgent(toolAuditCallback);
 
-// Sub-agent registries for URL-based routing at runtime
+// Sub-agent registry for job board scraping (URL-based routing at runtime)
 const subAgentRegistry = createJobBoardSubAgentRegistry();
-const applicationSubAgentRegistry = createApplicationSubAgentRegistry(toolAuditCallback);
 
 export const mastra = new Mastra({
 	agents: {
@@ -97,11 +87,8 @@ export const mastra = new Mastra({
 		'job-board-agent.greenhouse': greenhouseAgent,
 		'job-board-agent.generic': genericAgent,
 
-		// Job application agents
-		'job-application-agent': jobApplicationAgent,
-		'job-application-agent.linkedin': linkedInApplicationAgent,
-		'job-application-agent.greenhouse': greenhouseApplicationAgent,
-		'job-application-agent.generic': genericApplicationAgent
+		// Unified job application agent
+		'job-application-agent': jobApplicationAgent
 	},
 	storage: new LibSQLStore({
 		id: 'libsql-storage',
@@ -120,6 +107,6 @@ export const mastra = new Mastra({
 });
 
 // Wire late-bound services that depend on the Mastra instance
-services.withMastra(mastra, subAgentRegistry, applicationSubAgentRegistry);
+services.withMastra(mastra, subAgentRegistry);
 
-export { services, subAgentRegistry, applicationSubAgentRegistry };
+export { services, subAgentRegistry };

@@ -133,6 +133,10 @@ export type JobApplicationRequestContext = {
 	'resume-data': string;
 	/** Path to the generated resume PDF file for upload, or empty string if none */
 	'resume-file-path': string;
+	/** The detected site/ATS name (e.g. "LinkedIn", "Greenhouse", "Generic") */
+	'detected-site': string;
+	/** Site-specific supplemental instructions loaded from prompts/job-application-agent/sites/ */
+	'site-instructions': string;
 };
 
 /**
@@ -143,55 +147,7 @@ export const jobApplicationRequestContextSchema = z.object({
 	'user-profile': z.string(),
 	'job-description': z.string(),
 	'resume-data': z.string(),
-	'resume-file-path': z.string()
+	'resume-file-path': z.string(),
+	'detected-site': z.string(),
+	'site-instructions': z.string()
 });
-
-// ── Routing ─────────────────────────────────────────────────────────
-
-/**
- * Supported application site identifiers.
- * Used by the orchestrator to route to the correct sub-agent.
- */
-export type ApplicationSiteId = 'linkedin' | 'greenhouse' | 'lever' | 'generic';
-
-/**
- * Schema for the orchestrator's routing decision output.
- */
-export const applicationRoutingDecisionSchema = z.object({
-	detected_site: z
-		.string()
-		.describe(
-			'The identified application site or ATS name (e.g. "LinkedIn", "Greenhouse", "Lever")'
-		),
-	sub_agent_id: z
-		.string()
-		.describe(
-			'The dot-notation ID of the sub-agent to delegate to (e.g. "job-application-agent.linkedin")'
-		),
-	application_url: z.string().describe('The application URL to pass to the sub-agent'),
-	confidence: z
-		.enum(['high', 'medium', 'low'])
-		.describe('How confident the orchestrator is in the site identification'),
-	requires_login: z
-		.boolean()
-		.describe('Whether the site is likely to require authentication before applying'),
-	notes: z
-		.string()
-		.nullable()
-		.optional()
-		.describe(
-			'Any observations about the application page that might affect the sub-agent strategy'
-		)
-});
-
-export type ApplicationRoutingDecision = z.infer<typeof applicationRoutingDecisionSchema>;
-
-/**
- * Map of application site identifier to its corresponding sub-agent ID.
- */
-export const APPLICATION_SITE_AGENT_MAP: Record<ApplicationSiteId, string> = {
-	linkedin: 'job-application-agent.linkedin',
-	greenhouse: 'job-application-agent.greenhouse',
-	lever: 'job-application-agent.lever',
-	generic: 'job-application-agent.generic'
-} as const;

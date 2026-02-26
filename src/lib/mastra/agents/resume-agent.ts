@@ -15,6 +15,8 @@ import { createGenerateResumeTool, createListTemplatesTool } from '../tools/resu
 import { withToolLogging } from '../tools/with-logging';
 import { createAgent } from './create-agent';
 
+const RESUME_MODEL = 'z-ai/glm-4.7-flash';
+
 export function createResumeAgent(
 	profileService: ProfileService,
 	auditLogService: AuditLogService,
@@ -26,6 +28,7 @@ export function createResumeAgent(
 	return createAgent({
 		id: 'resume-agent',
 		name: 'Resume Writer Agent',
+		model: RESUME_MODEL,
 		tools: {
 			// Read-only profile access — the resume agent doesn't need to modify the profile
 			getProfile: withToolLogging(createGetProfileTool(profileService)),

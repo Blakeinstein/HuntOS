@@ -30,18 +30,19 @@ import type { BrowserAgentService } from './browserAgent';
 import type { AppSettingsService } from './appSettings';
 import type { TypstResumeService } from './typstResume';
 import type { ResumeTemplateService } from './resumeTemplate';
-import type { ApplicationSubAgentRegistry } from '$lib/mastra/agents/job-application-agent/registry';
 import type { Mastra } from '@mastra/core';
 import {
 	applicationResultSchema,
 	type ApplicationResult,
 	type ApplicationField
 } from '$lib/mastra/agents/job-application-agent/types';
+import { resolveSiteInstructions } from '$lib/mastra/agents/job-application-agent/site-instructions';
 import { RequestContext } from '@mastra/core/request-context';
 import type { JobApplicationRequestContext } from '$lib/mastra/agents/job-application-agent/types';
 import fs from 'fs';
 import { PIPELINE_STEPS } from './applicationPipeline';
 import { browserExec } from '$lib/mastra/tools/browser/exec';
+import { search } from 'search-ai-core';
 import path from 'path';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ class CancellationError extends Error {
  * ## Pipeline Steps
  *
  * 1. **Research** — Navigate to the job posting page with browser tools,
- *    extract the job description, and run a quick Google search for a
+ *    extract the job description, and run a quick web search for a
  *    company/role summary.
  *
  * 2. **Resume** — Using the job description + research from step 1 and the
@@ -145,7 +146,6 @@ export class ApplyPipelineExecutor {
 	private appSettingsService: AppSettingsService;
 	private typstResumeService: TypstResumeService;
 	private resumeTemplateService: ResumeTemplateService;
-	private applicationSubAgentRegistry: ApplicationSubAgentRegistry | null = null;
 	private mastra: Mastra | null = null;
 
 	constructor(deps: {
@@ -177,23 +177,11 @@ export class ApplyPipelineExecutor {
 	}
 
 	/**
-	 * Wire the application sub-agent registry after construction.
-	 *
-	 * This is set via the service container's `withMastra()` call to
-	 * break the circular dependency: the registry is created alongside
-	 * the Mastra instance, which itself depends on the service container.
-	 */
-	setApplicationSubAgentRegistry(registry: ApplicationSubAgentRegistry): void {
-		this.applicationSubAgentRegistry = registry;
-	}
-
-	/**
 	 * Wire the Mastra instance after construction.
 	 *
-	 * When set, the executor uses `mastra.getAgent(agentId)` to retrieve
-	 * agents that are already registered with the Mastra instance — this
-	 * ensures observability, tracing, and telemetry are wired in and
-	 * LLM invocations appear in Mastra Studio.
+	 * When set, the executor uses `mastra.getAgent('job-application-agent')`
+	 * to retrieve the registered agent — this ensures observability, tracing,
+	 * and telemetry are wired in and LLM invocations appear in Mastra Studio.
 	 */
 	setMastra(mastra: Mastra): void {
 		this.mastra = mastra;
@@ -463,86 +451,70 @@ export class ApplyPipelineExecutor {
 	}
 
 	/**
-	 * Run a Google search for the company + job title and extract a
-	 * quick summary from the search results snippet text. Uses the
-	 * browser tools to navigate to Google and read the results.
+	 * Run two parallel web searches (company overview + role-specific) via
+	 * search-ai-core and merge the results into a single markdown summary.
 	 */
-	private async googleSearchSummary(
-		runId: number,
-		company: string,
-		title: string
-	): Promise<string> {
-		const query = `${company} ${title} job`;
-		const encodedQuery = encodeURIComponent(query);
-		const searchUrl = `https://www.google.com/search?q=${encodedQuery}`;
+	private async webSearchSummary(runId: number, company: string, title: string): Promise<string> {
+		const companyQuery = company;
+		const roleQuery = `${title} at ${company}`;
 
 		try {
-			this.log(runId, 'research', `Searching Google for "${query}"…`, 'progress');
+			this.log(
+				runId,
+				'research',
+				`Searching web for "${companyQuery}" and "${roleQuery}"…`,
+				'progress'
+			);
 
-			const openResult = await browserExec(['open', searchUrl], { timeout: 15_000 });
-			if (!openResult.success) {
-				this.log(
-					runId,
-					'research',
-					`Google search navigation failed: ${openResult.stderr}`,
-					'warn'
-				);
+			this.checkCancelled(runId);
+
+			const [companyResults, roleResults] = await Promise.all([
+				search({ query: companyQuery, count: 3 }),
+				search({ query: roleQuery, count: 3 })
+			]);
+
+			this.checkCancelled(runId);
+
+			const markdownOpts = {
+				extend: true,
+				contentLength: 2000,
+				ignoreImages: true,
+				ignoreLinks: true
+			} as const;
+
+			const [companyMd, roleMd] = await Promise.all([
+				companyResults?.length ? companyResults.markdown(markdownOpts) : '',
+				roleResults?.length ? roleResults.markdown(markdownOpts) : ''
+			]);
+
+			this.checkCancelled(runId);
+
+			const sections: string[] = [];
+			if (companyMd.trim()) {
+				sections.push(`## Company: ${company}\n\n${companyMd.trim()}`);
+			}
+			if (roleMd.trim()) {
+				sections.push(`## Role: ${title} at ${company}\n\n${roleMd.trim()}`);
+			}
+
+			if (sections.length === 0) {
+				this.log(runId, 'research', 'Web search returned no useful content', 'warn');
 				return '';
 			}
 
-			this.checkCancelled(runId);
-
-			// Wait for search results to load
-			await browserExec(['wait', '2000'], { timeout: 10_000 });
-
-			this.checkCancelled(runId);
-
-			// Extract search result snippets
-			this.log(runId, 'research', 'Extracting Google search result snippets…', 'progress');
-			const snippetResult = await browserExec(
-				[
-					'eval',
-					`(() => {
-						const snippets = [];
-						// Standard Google search result containers
-						const resultBlocks = document.querySelectorAll('#search .g, #rso .g');
-						for (const block of Array.from(resultBlocks).slice(0, 5)) {
-							const titleEl = block.querySelector('h3');
-							const snippetEl = block.querySelector('[data-sncf], .VwiC3b, [style*="-webkit-line-clamp"], span:not(cite):not(h3)');
-							const linkEl = block.querySelector('a[href]');
-							const t = titleEl?.innerText?.trim() ?? '';
-							const s = snippetEl?.innerText?.trim() ?? '';
-							const u = linkEl?.getAttribute('href') ?? '';
-							if (t || s) snippets.push(t + '\\n' + s + (u ? '\\nURL: ' + u : ''));
-						}
-						if (snippets.length === 0) {
-							// Fallback: grab any visible text from search results area
-							const searchDiv = document.querySelector('#search, #rso');
-							if (searchDiv) return searchDiv.innerText.trim().slice(0, 3000);
-							return '';
-						}
-						return snippets.join('\\n\\n---\\n\\n');
-					})()`
-				],
-				{ timeout: 15_000 }
+			const summary = sections.join('\n\n---\n\n').slice(0, 8000);
+			const totalResults = (companyResults?.length ?? 0) + (roleResults?.length ?? 0);
+			this.log(
+				runId,
+				'research',
+				`Web search returned ${summary.length} characters from ${totalResults} results across 2 queries`,
+				'progress'
 			);
-
-			if (snippetResult.success && snippetResult.stdout.trim().length > 20) {
-				const summary = snippetResult.stdout.trim().slice(0, 5000);
-				this.log(
-					runId,
-					'research',
-					`Google search returned ${summary.length} characters of snippets`,
-					'progress'
-				);
-				return summary;
-			}
-
-			this.log(runId, 'research', 'Google search returned no useful snippets', 'warn');
+			return summary;
 		} catch (error) {
 			if (error instanceof CancellationError) throw error;
 			const msg = error instanceof Error ? error.message : String(error);
-			this.log(runId, 'research', `Google search failed: ${msg}`, 'warn');
+			this.log(runId, 'research', `Web search failed: ${msg}`, 'warn');
 		}
 
 		return '';
@@ -787,7 +759,7 @@ export class ApplyPipelineExecutor {
 
 	/**
 	 * Step 1: Research — navigate to the job posting with the browser,
-	 * extract the description, and run a Google search for supplemental info.
+	 * extract the description, and run a web search for supplemental info.
 	 */
 	private async executeResearchStep(
 		runId: number,
@@ -864,18 +836,18 @@ export class ApplyPipelineExecutor {
 
 			this.checkCancelled(runId);
 
-			// ── Google search for supplemental research ─────────────
-			let googleSummary = '';
+			// ── Web search for supplemental research ────────────────
+			let webSearchSummary = '';
 			try {
-				googleSummary = await this.googleSearchSummary(
+				webSearchSummary = await this.webSearchSummary(
 					runId,
 					application.company,
 					application.title
 				);
-			} catch (googleError) {
-				if (googleError instanceof CancellationError) throw googleError;
-				const msg = googleError instanceof Error ? googleError.message : String(googleError);
-				this.log(runId, step, `Google search error: ${msg}`, 'warn');
+			} catch (searchError) {
+				if (searchError instanceof CancellationError) throw searchError;
+				const msg = searchError instanceof Error ? searchError.message : String(searchError);
+				this.log(runId, step, `Web search error: ${msg}`, 'warn');
 			}
 
 			this.checkCancelled(runId);
@@ -888,8 +860,8 @@ export class ApplyPipelineExecutor {
 				`Posting URL: ${application.job_description_url ?? 'N/A'}`
 			];
 
-			if (googleSummary) {
-				companyInfoParts.push('', '--- Google Search Results ---', googleSummary);
+			if (webSearchSummary) {
+				companyInfoParts.push('', '--- Web Search Results ---', webSearchSummary);
 			}
 
 			const companyInfo = companyInfoParts.join('\n');
@@ -901,7 +873,7 @@ export class ApplyPipelineExecutor {
 				content: companyInfo,
 				meta: {
 					company: application.company,
-					hasGoogleSummary: !!googleSummary
+					hasWebSearchSummary: !!webSearchSummary
 				}
 			});
 
@@ -935,15 +907,15 @@ export class ApplyPipelineExecutor {
 				});
 			}
 
-			// Save the Google search summary as its own resource
-			if (googleSummary) {
+			// Save the web search summary as its own resource
+			if (webSearchSummary) {
 				this.resourceService.create({
 					applicationId: application.id,
 					resourceType: 'company_info',
-					title: `Google Search: ${application.company} ${application.title}`,
-					content: googleSummary,
+					title: `Web Search: ${application.company} ${application.title}`,
+					content: webSearchSummary,
 					meta: {
-						source: 'google-search',
+						source: 'web-search',
 						query: `${application.company} ${application.title} job`
 					}
 				});
@@ -954,10 +926,10 @@ export class ApplyPipelineExecutor {
 
 			finishStepAudit({
 				status: 'success',
-				detail: `Research completed for ${application.company}: ${jobDescription.length} chars of job description gathered${googleSummary ? `, ${googleSummary.length} chars from Google` : ''}`,
+				detail: `Research completed for ${application.company}: ${jobDescription.length} chars of job description gathered${webSearchSummary ? `, ${webSearchSummary.length} chars from web search` : ''}`,
 				meta: {
 					jobDescriptionLength: jobDescription.length,
-					googleSummaryLength: googleSummary.length
+					webSearchSummaryLength: webSearchSummary.length
 				}
 			});
 
@@ -1167,10 +1139,11 @@ export class ApplyPipelineExecutor {
 	 * Step 3: Apply — navigate to the job posting and use the Mastra
 	 * job-application agent to fill out and submit the application form.
 	 *
-	 * The agent is selected via the ApplicationSubAgentRegistry based on
-	 * the job URL (LinkedIn, Greenhouse, or generic fallback). It receives
-	 * the user profile, job description, resume data, and resume PDF path
-	 * via RequestContext, then uses browser tools to navigate and fill the
+	 * A single unified agent handles all sites. Site-specific instructions
+	 * are resolved from the URL at runtime and injected via RequestContext
+	 * as dynamic context. The agent receives the user profile, job
+	 * description, resume data, resume PDF path, and site-specific
+	 * instructions, then uses browser tools to navigate and fill the
 	 * form autonomously.
 	 */
 	private async executeApplyStep(
@@ -1196,37 +1169,31 @@ export class ApplyPipelineExecutor {
 
 			this.checkCancelled(runId);
 
-			// ── Resolve the sub-agent for this URL ───────────────────
-			if (!this.applicationSubAgentRegistry) {
-				throw new Error(
-					'ApplicationSubAgentRegistry not wired — call setApplicationSubAgentRegistry() ' +
-						'via the service container withMastra() lifecycle hook before running the pipeline.'
-				);
-			}
-
 			const url = application.job_description_url;
-			const entry = this.applicationSubAgentRegistry.resolveOrThrow(url);
-			this.log(
-				runId,
-				step,
-				`Resolved application agent: ${entry.site} (${entry.agentId})`,
-				'progress'
-			);
+
+			// ── Resolve site-specific instructions for this URL ──────
+			const { site, instructions: siteInstructions } = resolveSiteInstructions(url);
+			this.log(runId, step, `Detected application site: ${site}`, 'progress');
 
 			this.auditLogService.create({
 				category: 'agent',
-				agent_id: entry.agentId,
+				agent_id: 'job-application-agent',
 				status: 'success',
-				title: `Resolved sub-agent: ${entry.site}`,
-				detail: `URL: ${url} → Agent: ${entry.agentId}`,
-				meta: { applicationId: application.id, url, site: entry.site }
+				title: `Detected site: ${site}`,
+				detail: `URL: ${url} → Site: ${site}`,
+				meta: { applicationId: application.id, url, site }
 			});
 
-			// Prefer the Mastra-registered agent so observability / tracing is
-			// wired in and LLM invocations appear in Mastra Studio. Fall back
-			// to the registry factory if Mastra is not available.
+			// Retrieve the Mastra-registered agent so observability / tracing is
+			// wired in and LLM invocations appear in Mastra Studio.
+			if (!this.mastra) {
+				throw new Error(
+					'Mastra instance not wired — call setMastra() ' +
+						'via the service container withMastra() lifecycle hook before running the pipeline.'
+				);
+			}
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const agent = this.mastra ? (this.mastra as any).getAgent(entry.agentId) : entry.create();
+			const agent = (this.mastra as any).getAgent('job-application-agent');
 
 			// ── Build the request context ────────────────────────────
 			this.log(runId, step, 'Preparing application context…', 'progress');
@@ -1257,21 +1224,23 @@ export class ApplyPipelineExecutor {
 			requestContext.set('job-description', jobDescription);
 			requestContext.set('resume-data', resumeDataJson);
 			requestContext.set('resume-file-path', resumeFilePath);
+			requestContext.set('detected-site', site);
+			requestContext.set('site-instructions', siteInstructions);
 
 			this.checkCancelled(runId);
 
 			// ── Run the agent ────────────────────────────────────────
-			this.log(runId, step, `Launching ${entry.site} application agent on: ${url}`, 'progress');
+			this.log(runId, step, `Launching application agent (${site}) on: ${url}`, 'progress');
 
 			const agentStartAudit = this.auditLogService.start({
 				category: 'agent',
-				agent_id: entry.agentId,
-				title: `Application agent started: ${entry.site} → ${application.company}`,
+				agent_id: 'job-application-agent',
+				title: `Application agent started: ${site} → ${application.company}`,
 				meta: {
 					applicationId: application.id,
 					url,
-					site: entry.site,
-					agentId: entry.agentId,
+					site,
+					agentId: 'job-application-agent',
 					hasResumePdf: !!resumeFilePath
 				}
 			});
@@ -1539,8 +1508,8 @@ export class ApplyPipelineExecutor {
 				status: succeeded ? 'success' : 'warning',
 				detail: resultSummary,
 				meta: {
-					agentId: entry.agentId,
-					site: entry.site,
+					agentId: 'job-application-agent',
+					site,
 					success: appResult.success,
 					submitted: appResult.submitted,
 					blocked: appResult.blocked,

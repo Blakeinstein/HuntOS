@@ -4,6 +4,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { SERVER_ROUTES } from '@mastra/server/server-adapter';
 import type { ServerRoute } from '@mastra/server/server-adapter';
 import { RequestContext } from '@mastra/core/request-context';
@@ -17,6 +18,18 @@ type HonoEnv = {
 };
 
 const app = new Hono<HonoEnv>();
+
+// Enable CORS so Mastra Studio (localhost:3000) can reach us
+app.use(
+	'*',
+	cors({
+		origin: '*',
+		allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+		allowHeaders: ['Content-Type', 'Authorization'],
+		exposeHeaders: ['Content-Type'],
+		maxAge: 86400
+	})
+);
 
 // Attach mastra context to every request
 app.use('*', async (c, next) => {

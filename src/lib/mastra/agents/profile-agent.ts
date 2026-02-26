@@ -20,6 +20,8 @@ import {
 import { withToolLogging } from '../tools/with-logging';
 import { createAgent } from './create-agent';
 
+const PROFILE_MODEL = 'z-ai/glm-4.7-flash';
+
 export function createProfileAgent(
 	profileService: ProfileService,
 	auditLogService: AuditLogService,
@@ -28,6 +30,7 @@ export function createProfileAgent(
 	return createAgent({
 		id: 'profile-agent',
 		name: 'Profile Builder Agent',
+		model: PROFILE_MODEL,
 		tools: {
 			// Core profile CRUD tools
 			updateProfile: withToolLogging(createUpdateProfileTool(profileService)),
