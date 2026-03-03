@@ -4,6 +4,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { browserExec } from './exec';
+import { coerceBoolean } from '$lib/utils/boolean';
 
 export const openUrl = createTool({
 	id: 'browser-open',
@@ -21,9 +22,7 @@ export const openUrl = createTool({
 		const result = await browserExec(['open', url]);
 		return {
 			success: result.success,
-			message: result.success
-				? `Navigated to ${url}`
-				: `Failed to navigate: ${result.stderr}`
+			message: result.success ? `Navigated to ${url}` : `Failed to navigate: ${result.stderr}`
 		};
 	}
 });
@@ -104,24 +103,10 @@ export const snapshot = createTool({
 		'Each element gets a ref like @e1, @e2 which can be used in click, fill, etc. ' +
 		'Use --interactive to only show interactive elements, --compact to remove empty structural elements.',
 	inputSchema: z.object({
-		interactive: z
-			.boolean()
-			.optional()
-			.default(false)
-			.describe('Only show interactive elements (buttons, inputs, links, etc.)'),
-		compact: z
-			.boolean()
-			.optional()
-			.default(false)
-			.describe('Remove empty structural elements for a cleaner tree'),
-		selector: z
-			.string()
-			.optional()
-			.describe('Scope the snapshot to a CSS selector'),
-		depth: z
-			.number()
-			.optional()
-			.describe('Limit tree depth')
+		interactive: z.boolean().or(z.string()).optional().default(false),
+		compact: z.boolean().or(z.string()).optional().default(false),
+		selector: z.string().optional(),
+		depth: z.number().optional()
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -129,8 +114,8 @@ export const snapshot = createTool({
 	}),
 	execute: async ({ interactive, compact, selector, depth }) => {
 		const args = ['snapshot'];
-		if (interactive) args.push('-i');
-		if (compact) args.push('-c');
+		if (coerceBoolean(interactive)) args.push('-i');
+		if (coerceBoolean(compact)) args.push('-c');
 		if (depth !== undefined) args.push('-d', String(depth));
 		if (selector) args.push('-s', selector);
 
@@ -148,15 +133,8 @@ export const screenshot = createTool({
 		'Take a screenshot of the current page. Optionally save to a file path. ' +
 		'Use fullPage to capture the entire scrollable page.',
 	inputSchema: z.object({
-		path: z
-			.string()
-			.optional()
-			.describe('File path to save the screenshot to (e.g. "screenshot.png")'),
-		fullPage: z
-			.boolean()
-			.optional()
-			.default(false)
-			.describe('Capture the full scrollable page instead of just the viewport')
+		path: z.string().optional(),
+		fullPage: z.boolean().or(z.string()).optional().default(false)
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -165,7 +143,7 @@ export const screenshot = createTool({
 	}),
 	execute: async ({ path, fullPage }) => {
 		const args = ['screenshot'];
-		if (fullPage) args.push('--full');
+		if (coerceBoolean(fullPage)) args.push('--full');
 		if (path) args.push(path);
 
 		const result = await browserExec(args, { timeout: 15_000 });
@@ -215,9 +193,7 @@ export const scroll = createTool({
 	id: 'browser-scroll',
 	description: 'Scroll the page in a given direction.',
 	inputSchema: z.object({
-		direction: z
-			.enum(['up', 'down', 'left', 'right'])
-			.describe('Direction to scroll'),
+		direction: z.enum(['up', 'down', 'left', 'right']).describe('Direction to scroll'),
 		pixels: z
 			.number()
 			.optional()

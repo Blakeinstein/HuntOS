@@ -3,7 +3,7 @@ import { withToolLoggingAll, type ToolLoggingOptions } from '../../tools/with-lo
 import { createAgent } from '../create-agent';
 import { jobApplicationRequestContextSchema, type JobApplicationRequestContext } from './types';
 
-const ORCHESTRATOR_MODEL = 'qwen/qwen3.5-35b-a3b';
+const ORCHESTRATOR_MODEL = 'qwen/qwen3.5-flash-02-23';
 /**
  * Creates the unified job application agent.
  *
@@ -47,7 +47,7 @@ const ORCHESTRATOR_MODEL = 'qwen/qwen3.5-35b-a3b';
  *
  * const result = await agent.generate('Apply to this job posting.', {
  *   requestContext: ctx,
- *   structuredOutput: { schema: applicationResultSchema },
+ *   maxSteps: 50,
  * });
  * ```
  */

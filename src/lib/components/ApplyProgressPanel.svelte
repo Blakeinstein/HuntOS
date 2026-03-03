@@ -49,9 +49,12 @@
 		onResumeFrom
 	}: Props = $props();
 
+	const LOG_TRUNCATE_LENGTH = 200;
+
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let expandedResources = new SvelteSet<number>();
 	let expandedSteps = new SvelteSet<string>();
+	let expandedLogs = new SvelteSet<number>();
 	let localLatestRun = $state<PipelineRun | null>(null);
 	let localResources = $state<ApplicationResource[]>([]);
 	let stepLogs = $state<PipelineStepLog[]>([]);
@@ -85,6 +88,7 @@
 			cancelError = null;
 			expandedSteps.clear();
 			expandedResources.clear();
+			expandedLogs.clear();
 		}
 	});
 
@@ -554,13 +558,38 @@
 								>
 									{#each logs as log (log.id)}
 										{@const LogIcon = getLogIcon(log.level)}
+										{@const isLongLog = log.message.length > LOG_TRUNCATE_LENGTH}
+										{@const isLogExpanded = expandedLogs.has(log.id)}
 										<div class="flex items-start gap-1.5 py-0.5">
 											<LogIcon class="mt-px size-3 shrink-0 {getLogColor(log.level)}" />
-											<p
-												class="min-w-0 flex-1 text-[11px] leading-relaxed {getLogColor(log.level)}"
-											>
-												{log.message}
-											</p>
+											<div class="min-w-0 flex-1">
+												<p
+													class="text-[11px] leading-relaxed {getLogColor(log.level)}"
+													class:whitespace-pre-wrap={isLogExpanded}
+												>
+													{#if isLongLog && !isLogExpanded}
+														{log.message.slice(0, LOG_TRUNCATE_LENGTH)}…
+														<button
+															type="button"
+															class="ml-1 inline text-[10px] underline opacity-60 hover:opacity-100"
+															onclick={() => expandedLogs.add(log.id)}
+														>
+															show more
+														</button>
+													{:else}
+														{log.message}
+														{#if isLongLog}
+															<button
+																type="button"
+																class="ml-1 inline text-[10px] underline opacity-60 hover:opacity-100"
+																onclick={() => expandedLogs.delete(log.id)}
+															>
+																show less
+															</button>
+														{/if}
+													{/if}
+												</p>
+											</div>
 											<span class="shrink-0 text-[9px] tabular-nums opacity-30">
 												{formatTime(log.created_at)}
 											</span>

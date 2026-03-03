@@ -43,38 +43,7 @@ import {
 	formatSseFrame,
 	formatSseComment
 } from '$lib/services/services/scrapeRunManager';
-
-// ── JSON extraction helpers (mirrored from jobBoardScraper.ts) ──────
-
-function extractJson(text: string): unknown {
-	const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-	if (fenceMatch) {
-		try {
-			return JSON.parse(fenceMatch[1].trim());
-		} catch {
-			/* fall through */
-		}
-	}
-	const firstBrace = text.indexOf('{');
-	const lastBrace = text.lastIndexOf('}');
-	if (firstBrace !== -1 && lastBrace > firstBrace) {
-		try {
-			return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-		} catch {
-			/* fall through */
-		}
-	}
-	const firstBracket = text.indexOf('[');
-	const lastBracket = text.lastIndexOf(']');
-	if (firstBracket !== -1 && lastBracket > firstBracket) {
-		try {
-			return JSON.parse(text.slice(firstBracket, lastBracket + 1));
-		} catch {
-			/* fall through */
-		}
-	}
-	return undefined;
-}
+import { extractJson } from '$lib/services/helpers/extractJson';
 
 function parseAgentResponse(text: string): ScrapeResult | null {
 	const raw = extractJson(text);

@@ -37,6 +37,10 @@ import {
 	type ApplicationResult,
 	type ApplicationField
 } from '$lib/mastra/agents/job-application-agent/types';
+import {
+	runAgentContinuationLoop,
+	type IterationInfo
+} from '$lib/services/helpers/agentContinuationLoop';
 import { resolveSiteInstructions } from '$lib/mastra/agents/job-application-agent/site-instructions';
 import { RequestContext } from '@mastra/core/request-context';
 import type { JobApplicationRequestContext } from '$lib/mastra/agents/job-application-agent/types';
@@ -1311,84 +1315,113 @@ export class ApplyPipelineExecutor {
 			let appResult: ApplicationResult;
 
 			try {
-				const agentResult = await agent.generate(userMessage, {
+				// Use the continuation loop: if the agent stops mid-task without
+				// producing a JSON result, the loop feeds the conversation history
+				// back with a continuation prompt so it can pick up where it left off.
+				const loopResult = await runAgentContinuationLoop({
+					agent,
+					initialMessage: userMessage,
 					requestContext,
-					structuredOutput: { schema: applicationResultSchema }
-				});
-				appResult = agentResult.object;
-			} catch (firstError) {
-				const errMsg = firstError instanceof Error ? firstError.message : String(firstError);
-
-				// If the structured output validation failed (e.g. model returned an
-				// array instead of an object), retry with jsonPromptInjection which
-				// embeds the JSON schema directly into the prompt — smaller models
-				// handle this much better than tool-mode structured output.
-				if (
-					errMsg.includes('Structured output validation failed') ||
-					errMsg.includes('expected object') ||
-					errMsg.includes('expected string') ||
-					errMsg.includes('Invalid input')
-				) {
-					this.log(
-						runId,
-						step,
-						`Structured output parsing failed, retrying with JSON prompt injection: ${errMsg}`,
-						'warn'
-					);
-
-					agentStartAudit({
-						status: 'warning',
-						detail: `Structured output validation failed on first attempt, retrying with jsonPromptInjection`,
-						meta: { error: errMsg, retrying: true }
-					});
-
-					try {
-						const retryResult = await agent.generate(userMessage, {
-							requestContext,
-							structuredOutput: {
-								schema: applicationResultSchema,
-								jsonPromptInjection: true
-							}
-						});
-						appResult = retryResult.object;
-					} catch (retryError) {
-						const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
-
+					schema: applicationResultSchema,
+					maxStepsPerIteration: 30,
+					totalStepBudget: 80,
+					maxIterations: 5,
+					onBeforeIteration: (iteration, totalStepsSoFar) => {
+						this.checkCancelled(runId);
 						this.log(
 							runId,
 							step,
-							`Retry with JSON prompt injection also failed: ${retryMsg}`,
-							'warn'
-						);
-
-						// Last resort: try to extract JSON from the agent's text response
-						const extracted = this.tryExtractApplicationResult(retryError);
-						if (!extracted) {
-							agentStartAudit({
-								status: 'error',
-								detail: `Agent structured output failed after retry: ${retryMsg}`,
-								meta: { firstError: errMsg, retryError: retryMsg }
-							});
-							throw retryError;
-						}
-
-						appResult = extracted;
-
-						this.log(
-							runId,
-							step,
-							`Successfully extracted structured result from raw agent output`,
+							iteration === 1
+								? `Starting application agent (budget: 80 steps)…`
+								: `Continuing agent — iteration ${iteration} (${totalStepsSoFar} steps used so far)…`,
 							'progress'
 						);
+					},
+					onIterationComplete: (info: IterationInfo) => {
+						// Summary line
+						this.log(
+							runId,
+							step,
+							`Iteration ${info.iteration}: ${info.stepsThisIteration} steps, ` +
+								`${info.toolCallsThisIteration} tool calls, ` +
+								`text=${info.textLength} chars` +
+								(info.foundJson
+									? info.schemaValid
+										? ' ✓ valid JSON result'
+										: ' ✗ JSON found but schema invalid'
+									: ' — no JSON output yet') +
+								(info.wasFinalAttempt ? ' (final attempt)' : ''),
+							info.schemaValid ? 'progress' : 'warn'
+						);
+
+						// Agent's natural-language commentary (where it is / what it's doing)
+						if (info.agentText) {
+							this.log(runId, step, `Agent status: ${info.agentText}`, 'progress');
+						}
+
+						// Model reasoning / chain-of-thought (if the model supports it)
+						if (info.reasoningText) {
+							this.log(runId, step, `Agent reasoning: ${info.reasoningText}`, 'progress');
+						}
 					}
+				});
+
+				this.log(
+					runId,
+					step,
+					`Agent loop completed: ${loopResult.iterations} iteration(s), ` +
+						`${loopResult.totalSteps} total steps, ` +
+						`${loopResult.totalToolCalls} total tool calls`,
+					'progress'
+				);
+
+				if (loopResult.result) {
+					appResult = loopResult.result;
 				} else {
+					// All iterations exhausted without a valid structured result
+					const detail = loopResult.validationError
+						? `Agent JSON failed schema validation after ${loopResult.iterations} iteration(s): ${loopResult.validationError}`
+						: `Agent produced no parseable JSON after ${loopResult.iterations} iteration(s). ` +
+							`Last text: ${loopResult.lastText}`;
+
 					agentStartAudit({
 						status: 'error',
-						detail: `Agent generate failed: ${errMsg}`,
+						detail,
+						meta: {
+							iterations: loopResult.iterations,
+							totalSteps: loopResult.totalSteps,
+							totalToolCalls: loopResult.totalToolCalls,
+							validationError: loopResult.validationError,
+							textPreview: loopResult.lastText
+						}
+					});
+					throw new Error(detail);
+				}
+			} catch (error) {
+				if (error instanceof CancellationError) throw error;
+
+				const errMsg = error instanceof Error ? error.message : String(error);
+				this.log(runId, step, `Agent execution failed: ${errMsg}`, 'warn');
+
+				// Last resort: try to extract JSON from error details
+				const extracted = this.tryExtractApplicationResult(error);
+				if (!extracted) {
+					agentStartAudit({
+						status: 'error',
+						detail: `Agent failed: ${errMsg}`,
 						meta: { error: errMsg }
 					});
-					throw firstError;
+					throw error;
 				}
+
+				appResult = extracted;
+
+				this.log(
+					runId,
+					step,
+					`Successfully extracted structured result from error details`,
+					'progress'
+				);
 			}
 
 			agentStartAudit({
