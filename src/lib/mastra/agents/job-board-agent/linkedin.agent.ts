@@ -1,9 +1,5 @@
 import { browserTools } from '../../tools/browser';
-
-const LINKEDIN_AGENT_MODEL =
-	process.env.JOB_BOARD_LINKEDIN_MODEL ??
-	process.env.JOB_BOARD_AGENT_MODEL ??
-	'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
+import { env } from '$env/dynamic/private';
 import { withToolLoggingAll } from '../../tools/with-logging';
 import { createAgent } from '../create-agent';
 import { jobBoardRequestContextSchema, type JobBoardRequestContext } from './types';
@@ -35,7 +31,10 @@ export function createLinkedInAgent() {
 	return createAgent({
 		id: 'job-board-agent.linkedin',
 		name: 'LinkedIn Scraping Agent',
-		model: LINKEDIN_AGENT_MODEL,
+		model:
+			env.JOB_BOARD_LINKEDIN_MODEL ??
+			env.JOB_BOARD_AGENT_MODEL ??
+			'openrouter/qwen/qwen3-30b-a3b-instruct-2507',
 		requestContextSchema: jobBoardRequestContextSchema,
 		dynamicContext: ({ requestContext }) => ({
 			'Target URL': `\`${requestContext.get('job-board-url') as JobBoardRequestContext['job-board-url']}\``,

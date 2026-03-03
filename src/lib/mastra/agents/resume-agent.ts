@@ -13,9 +13,8 @@ import { createGetProfileTool } from '../tools/profile-tools';
 import { createSearchDocumentsTool } from '../tools/profile/index';
 import { createGenerateResumeTool, createListTemplatesTool } from '../tools/resume/index';
 import { withToolLogging } from '../tools/with-logging';
+import { env } from '$env/dynamic/private';
 import { createAgent } from './create-agent';
-
-const RESUME_MODEL = process.env.RESUME_AGENT_MODEL ?? 'z-ai/glm-4.7-flash';
 
 export function createResumeAgent(
 	profileService: ProfileService,
@@ -28,7 +27,7 @@ export function createResumeAgent(
 	return createAgent({
 		id: 'resume-agent',
 		name: 'Resume Writer Agent',
-		model: RESUME_MODEL,
+		model: env.RESUME_AGENT_MODEL ?? 'z-ai/glm-4.7-flash',
 		tools: {
 			// Read-only profile access — the resume agent doesn't need to modify the profile
 			getProfile: withToolLogging(createGetProfileTool(profileService)),

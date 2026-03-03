@@ -108,10 +108,14 @@ The resume step typically shows:
 - An optional cover letter upload.
 
 To upload a resume:
-1. Call `browser-snapshot` to locate the file input. Look for `input[type="file"]`, or a button with text "Upload resume" / "Choose file".
-2. If Resume File Path is not empty, call `browser-fill { selector: "input[type='file']", text: "<Resume File Path>" }`. If the file input is hidden, first click the upload button: `browser-find-text { text: "Upload resume", action: "click" }`.
+1. Call `browser-snapshot` to locate the file upload element. Look for `input[type="file"]`, an "Upload resume" button, a "Choose file" button, or a drag-and-drop zone.
+2. If Resume File Path is not empty:
+   - Use `browser-upload { selector: "@eN", files: "<Resume File Path>" }` where `@eN` is the ref of the upload button, drop zone, or `input[type="file"]` element found in the snapshot.
+   - **NEVER use `browser-click` on an upload button** — this opens a native OS file picker the agent cannot interact with.
+   - **NEVER use `browser-fill` for file uploads.**
+   - If the snapshot ref is for the visible "Upload resume" button (not the hidden file input), `browser-upload` handles it correctly regardless.
 3. If Resume File Path is empty, check if a previously uploaded resume is already selected (look for a filename display in the snapshot). If so, leave it. If no resume is selected, record the field as `missing`.
-4. After uploading, call `browser-snapshot` to verify the filename appears in the upload area.
+4. After uploading, call `browser-snapshot` to verify the filename appears in the upload area confirming success.
 
 For cover letter:
 - If a cover letter upload field exists and no file is available, skip it (it is usually optional).
@@ -140,10 +144,23 @@ This step contains employer-defined custom questions. Call `browser-snapshot { i
 3. Call `browser-select { selector: "@eN", value: "Option Text" }`.
 
 **For radio button groups:**
-1. Read all radio labels from the snapshot to understand the options.
-2. Call `browser-click { selector: "@eN" }` on the most appropriate radio button.
+1. Call `browser-snapshot` and read all radio option labels and their refs (e.g. `@e10 Yes`, `@e11 No`).
+2. Choose the most appropriate option based on the user profile. If the information is not available, pick the most neutral/reasonable option (e.g. "No", "Prefer not to answer", "Decline to self-identify").
+3. Call `browser-click { selector: "@eN" }` directly on the radio `input` ref — NOT on its label.
+4. Call `browser-snapshot` to confirm the radio is now checked. If it is not checked, try `browser-click` on the label ref associated with the desired option.
+5. **NEVER use `browser-fill` or `browser-check` on a radio button.** Radio buttons must always be activated with `browser-click`.
 
 **Multiple additional question pages:** LinkedIn may spread custom questions across multiple steps. After each page, call `browser-find-text { text: "Next", action: "click" }` and `browser-snapshot` to check for more questions.
+
+**If "Next" does not advance the form (stuck on a step):**
+1. Call `browser-snapshot` immediately — look for red error text, required field indicators (`*`), or `.artdeco-inline-feedback--error` messages.
+2. Call `browser-get-count { selector: ".artdeco-inline-feedback--error" }` to count validation errors.
+3. For each error, identify the offending field from the snapshot and fix it:
+   - Select/dropdown: `browser-select { selector: "@eN", value: "..." }`
+   - Radio group: `browser-click { selector: "@eN" }` on the correct option
+   - Text input: `browser-fill { selector: "@eN", text: "..." }`
+4. Take a fresh `browser-snapshot` and retry "Next".
+5. If the same validation error persists after 2 fix attempts, record it in `errors`, mark the field as `error`, and try advancing anyway. Do NOT loop indefinitely on a single step.
 
 #### Review (Step N-1)
 
@@ -227,10 +244,12 @@ These selectors are known patterns for LinkedIn's job application UI as of 2024�
 ### LinkedIn-Specific Rules
 
 - **Handle LinkedIn's autocomplete fields carefully.** After `browser-fill`, call `browser-wait-time { ms: 800 }`, then `browser-snapshot` to find the suggestion dropdown. Call `browser-click` on the best match. If no suggestions appear, try clearing with `browser-fill { selector: "@eN", text: "" }` and retyping.
-- **Watch for validation errors after each step.** If clicking "Next" doesn't advance, call `browser-snapshot` and check for error messages (`.artdeco-inline-feedback--error`). Try to fix the issue or mark the field as `error`.
+- **Watch for validation errors after each step.** If clicking "Next" doesn't advance, call `browser-snapshot` and check for error messages (`.artdeco-inline-feedback--error`). Use `browser-get-count { selector: ".artdeco-inline-feedback--error" }` to enumerate errors. Fix each errored field (radios → `browser-click`, selects → `browser-select`, text → `browser-fill`). Retry "Next" once. If still stuck after 2 attempts, record in `errors` and move on — never loop indefinitely.
 - **Handle the dismiss confirmation dialog.** If you need to close the modal prematurely, LinkedIn may show "Discard application?" — use `browser-find-text { text: "Discard", action: "click" }` to cleanly close.
 - **Be efficient.** LinkedIn Easy Apply is designed to be quick. Most applications should complete in under 60 seconds of interaction time. Don't over-think simple fields.
 - **Verify pre-filled fields.** LinkedIn often pre-fills contact info. Use `browser-get-value` to verify pre-filled values match the user profile before advancing.
 - **Handle external tab switches properly.** If the apply button opens a new tab, call `browser-tab-list` then `browser-tab-switch` to follow the redirect.
 - **Always start by navigating.** Even if you're already on LinkedIn, always call `browser-open` with the target URL first. The browser session state may have changed.
+- **Use best-fit answers when profile data is unavailable.** If a required field has no matching profile data, choose the most neutral or reasonable available option rather than leaving it blank or stopping. Record the choice in the `fields` array with `status: "best_fit"` and explain what was chosen in `error_reason`.
+- **File uploads: always use `browser-upload`.** Never `browser-click` or `browser-fill` on any upload button or file input. `browser-upload { selector: "@eN", files: "/absolute/path/to/resume.pdf" }` sets the file directly without opening any dialog.
 - **Detect page state early.** After initial navigation and snapshot, immediately check for login walls, closed jobs, or "already applied" states before attempting to fill forms.

@@ -1,7 +1,8 @@
 import { generateObject, generateText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { logLLMError } from '$lib/services/helpers/formatLLMError';
 import Handlebars from 'handlebars';
-import { OPENROUTER_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
+import { resolveLanguageModel } from '$lib/mastra/providers';
 import type { ProfileService, ProfileData } from './profile';
 import type { ResumeTemplateService, ResumeTemplate } from './resumeTemplate';
 import { resumeDataSchema, type ResumeData } from '../resume/schema';
@@ -16,7 +17,7 @@ const __dirname = path.dirname(__filename);
 // ── Types ────────────────────────────────────────────────────────
 
 export interface ResumeGenerationConfig {
-	/** OpenRouter model identifier (default: qwen/qwen3-30b-a3b-instruct-2507) */
+	/** Provider-qualified model string (e.g. "openrouter/qwen/qwen3-30b-a3b-instruct-2507") */
 	model: string;
 	/** Request timeout in milliseconds (default: 120 000 — 2 minutes) */
 	timeoutMs: number;
@@ -33,11 +34,16 @@ export interface ResumeGenerationResult {
 	templateName: string;
 }
 
-const DEFAULT_CONFIG: ResumeGenerationConfig = {
-	model: 'qwen/qwen3-30b-a3b-instruct-2507',
-	timeoutMs: 120_000,
-	maxOutputTokens: 16_384
-};
+function getDefaultConfig(): ResumeGenerationConfig {
+	return {
+		model:
+			env.RESUME_SERVICE_MODEL ??
+			env.DEFAULT_MODEL ??
+			'openrouter/qwen/qwen3-30b-a3b-instruct-2507',
+		timeoutMs: 120_000,
+		maxOutputTokens: 16_384
+	};
+}
 
 // ── Service ──────────────────────────────────────────────────────
 
@@ -55,7 +61,6 @@ export class ResumeGenerationService {
 	private profileService: ProfileService;
 	private templateService: ResumeTemplateService;
 	private config: ResumeGenerationConfig;
-	private openrouter: ReturnType<typeof createOpenRouter>;
 	private promptTemplate: string | null = null;
 
 	constructor(
@@ -65,8 +70,7 @@ export class ResumeGenerationService {
 	) {
 		this.profileService = profileService;
 		this.templateService = templateService;
-		this.config = { ...DEFAULT_CONFIG, ...config };
-		this.openrouter = createOpenRouter({ apiKey: OPENROUTER_API_KEY });
+		this.config = { ...getDefaultConfig(), ...config };
 	}
 
 	// ── Public API ────────────────────────────────────────────────
@@ -123,7 +127,7 @@ export class ResumeGenerationService {
 	 * silent truncation by the provider's default completion limit.
 	 */
 	private async callLLM(prompt: string): Promise<ResumeData> {
-		const baseModel = this.openrouter(this.config.model);
+		const baseModel = resolveLanguageModel(this.config.model);
 
 		// Wrap with reasoning-extraction middleware so `<think>` blocks from
 		// thinking models (Qwen3, DeepSeek R1, etc.) are stripped before the
@@ -139,6 +143,7 @@ export class ResumeGenerationService {
 		};
 
 		// ── Primary: generateObject (native structured output) ────
+		let primaryError: unknown;
 		try {
 			const result = await generateObject({
 				model,
@@ -152,13 +157,17 @@ export class ResumeGenerationService {
 				// Repair truncated / malformed JSON before validation.
 				// Called automatically when the raw text fails to parse or
 				// doesn't match the schema.
+				// experimental_repairText must return a string (not null).
+				// If our repair helper cannot fix the text we return the
+				// stripped/raw text as-is so the SDK still gets a string and
+				// can throw a proper validation error rather than a null-ref.
 				experimental_repairText: async ({ text }) => {
 					console.warn(
 						'[ResumeGeneration] repairText invoked. finishReason may be "length" (truncation). Attempting repair…',
 						'text length:',
 						text.length
 					);
-					return this.repairJson(text);
+					return this.repairJson(text) ?? text;
 				}
 			});
 
@@ -171,11 +180,13 @@ export class ResumeGenerationService {
 			}
 
 			return result.object;
-		} catch (primaryError) {
-			console.warn(
-				'[ResumeGeneration] generateObject failed, falling back to generateText:',
-				primaryError instanceof Error ? primaryError.message : primaryError
-			);
+		} catch (err) {
+			primaryError = err;
+			logLLMError(err, '[ResumeGeneration][generateObject]', {
+				model: this.config.model,
+				promptLength: prompt.length
+			});
+			console.warn('[ResumeGeneration] generateObject failed — falling back to generateText');
 		}
 
 		// ── Fallback: generateText → extract + repair + validate ──
@@ -196,32 +207,40 @@ export class ResumeGenerationService {
 		// Try to extract and repair JSON from the raw text
 		const json = this.extractAndRepairJson(text);
 		if (!json) {
+			const { summary: primarySummary } = logLLMError(
+				primaryError,
+				'[ResumeGeneration][generateObject]'
+			);
 			console.error(
-				'[ResumeGeneration] Could not extract JSON from LLM response.',
+				'[ResumeGeneration][generateText fallback] Could not extract JSON from response.',
 				`finishReason=${finishReason}`,
-				'Raw text (first 2000 chars):',
+				'Raw text (first 2000 chars):\n',
 				text.slice(0, 2000)
 			);
 			throw new Error(
-				`Resume generation failed: the model did not return valid JSON (finishReason=${finishReason}). ` +
+				`Resume generation failed: model did not return parseable JSON ` +
+					`(finishReason=${finishReason}). generateObject failure: ${primarySummary}. ` +
 					'Try again or switch to a different model.'
 			);
 		}
 
 		const result = resumeDataSchema.safeParse(json);
 		if (!result.success) {
-			console.error(
-				'[ResumeGeneration] Extracted JSON did not match schema.',
-				`finishReason=${finishReason}`,
-				'Validation errors:',
-				JSON.stringify(result.error.issues ?? result.error, null, 2)
+			const { summary: primarySummary } = logLLMError(
+				primaryError,
+				'[ResumeGeneration][generateObject]'
 			);
 			console.error(
-				'[ResumeGeneration] Extracted JSON (first 2000 chars):',
+				'[ResumeGeneration][generateText fallback] Extracted JSON did not match schema.',
+				`finishReason=${finishReason}`,
+				'Validation errors:\n',
+				JSON.stringify(result.error.issues ?? result.error, null, 2),
+				'\nExtracted JSON (first 2000 chars):\n',
 				JSON.stringify(json).slice(0, 2000)
 			);
 			throw new Error(
-				`Resume generation failed: the model returned JSON that did not match the expected schema (finishReason=${finishReason}). ` +
+				`Resume generation failed: JSON did not match the expected schema ` +
+					`(finishReason=${finishReason}). generateObject failure: ${primarySummary}. ` +
 					'Try again or switch to a different model.'
 			);
 		}

@@ -1,2 +1,7 @@
 // src/lib/mastra/providers/index.ts
-export { resolveModel, getSupportedProviders } from './registry';
+export {
+	resolveModel,
+	resolveLanguageModel,
+	resolveEmbeddingModel,
+	getSupportedProviders
+} from './registry';

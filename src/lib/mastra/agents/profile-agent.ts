@@ -18,9 +18,8 @@ import {
 	createSearchDocumentsTool
 } from '../tools/profile/index';
 import { withToolLogging } from '../tools/with-logging';
+import { env } from '$env/dynamic/private';
 import { createAgent } from './create-agent';
-
-const PROFILE_MODEL = process.env.PROFILE_AGENT_MODEL ?? 'z-ai/glm-4.7-flash';
 
 export function createProfileAgent(
 	profileService: ProfileService,
@@ -30,7 +29,7 @@ export function createProfileAgent(
 	return createAgent({
 		id: 'profile-agent',
 		name: 'Profile Builder Agent',
-		model: PROFILE_MODEL,
+		model: env.PROFILE_AGENT_MODEL ?? 'z-ai/glm-4.7-flash',
 		tools: {
 			// Core profile CRUD tools
 			updateProfile: withToolLogging(createUpdateProfileTool(profileService)),

@@ -1,10 +1,8 @@
 import { browserTools } from '../../tools/browser';
 import { withToolLoggingAll, type ToolLoggingOptions } from '../../tools/with-logging';
+import { env } from '$env/dynamic/private';
 import { createAgent } from '../create-agent';
 import { jobApplicationRequestContextSchema, type JobApplicationRequestContext } from './types';
-
-const ORCHESTRATOR_MODEL =
-	process.env.JOB_APPLICATION_AGENT_MODEL ?? 'openrouter/qwen/qwen3.5-flash-02-23';
 /**
  * Creates the unified job application agent.
  *
@@ -70,7 +68,7 @@ export function createJobApplicationAgent(toolLogging?: ToolLoggingOptions) {
 				'site-instructions'
 			) as JobApplicationRequestContext['site-instructions']
 		}),
-		model: ORCHESTRATOR_MODEL,
+		model: env.JOB_APPLICATION_AGENT_MODEL ?? 'openrouter/qwen/qwen3.5-flash-02-23',
 		tools: {
 			...withToolLoggingAll(browserTools, toolLogging)
 		}

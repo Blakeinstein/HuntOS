@@ -1,5 +1,5 @@
 // src/lib/mastra/tools/browser/interaction.ts
-// Browser interaction tools — click, fill, type, press, hover, select, check, uncheck
+// Browser interaction tools — click, fill, type, press, hover, select, check, uncheck, upload
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -34,9 +34,7 @@ export const dblclick = createTool({
 	id: 'browser-dblclick',
 	description: 'Double-click an element on the page.',
 	inputSchema: z.object({
-		selector: z
-			.string()
-			.describe('CSS selector or snapshot ref (e.g. "@e1")')
+		selector: z.string().describe('CSS selector or snapshot ref (e.g. "@e1")')
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -87,9 +85,7 @@ export const type = createTool({
 		'Use this when you want to append text or simulate real typing. ' +
 		'For clearing and replacing, use "fill" instead.',
 	inputSchema: z.object({
-		selector: z
-			.string()
-			.describe('CSS selector or snapshot ref of the input element'),
+		selector: z.string().describe('CSS selector or snapshot ref of the input element'),
 		text: z.string().describe('The text to type')
 	}),
 	outputSchema: z.object({
@@ -113,9 +109,7 @@ export const press = createTool({
 		'Press a keyboard key. Use for Enter, Tab, Escape, arrow keys, or key combos like "Control+a". ' +
 		'Common keys: Enter, Tab, Escape, Backspace, ArrowUp, ArrowDown, Control+a, Control+c, Control+v.',
 	inputSchema: z.object({
-		key: z
-			.string()
-			.describe('Key to press (e.g. "Enter", "Tab", "Escape", "Control+a")')
+		key: z.string().describe('Key to press (e.g. "Enter", "Tab", "Escape", "Control+a")')
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -125,9 +119,7 @@ export const press = createTool({
 		const result = await browserExec(['press', key]);
 		return {
 			success: result.success,
-			message: result.success
-				? `Pressed ${key}`
-				: `Failed to press ${key}: ${result.stderr}`
+			message: result.success ? `Pressed ${key}` : `Failed to press ${key}: ${result.stderr}`
 		};
 	}
 });
@@ -137,9 +129,7 @@ export const hover = createTool({
 	description:
 		'Hover over an element. Use this to trigger hover menus, tooltips, or dropdown reveals.',
 	inputSchema: z.object({
-		selector: z
-			.string()
-			.describe('CSS selector or snapshot ref of the element to hover')
+		selector: z.string().describe('CSS selector or snapshot ref of the element to hover')
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -162,9 +152,7 @@ export const select = createTool({
 		'Select an option from a dropdown (<select>) element. ' +
 		'Provide the value of the option to select.',
 	inputSchema: z.object({
-		selector: z
-			.string()
-			.describe('CSS selector or snapshot ref of the <select> element'),
+		selector: z.string().describe('CSS selector or snapshot ref of the <select> element'),
 		value: z.string().describe('The value of the option to select')
 	}),
 	outputSchema: z.object({
@@ -186,9 +174,7 @@ export const check = createTool({
 	id: 'browser-check',
 	description: 'Check a checkbox element (set it to checked/true).',
 	inputSchema: z.object({
-		selector: z
-			.string()
-			.describe('CSS selector or snapshot ref of the checkbox')
+		selector: z.string().describe('CSS selector or snapshot ref of the checkbox')
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -209,9 +195,7 @@ export const uncheck = createTool({
 	id: 'browser-uncheck',
 	description: 'Uncheck a checkbox element (set it to unchecked/false).',
 	inputSchema: z.object({
-		selector: z
-			.string()
-			.describe('CSS selector or snapshot ref of the checkbox')
+		selector: z.string().describe('CSS selector or snapshot ref of the checkbox')
 	}),
 	outputSchema: z.object({
 		success: z.boolean(),
@@ -224,6 +208,42 @@ export const uncheck = createTool({
 			message: result.success
 				? `Unchecked ${selector}`
 				: `Failed to uncheck ${selector}: ${result.stderr}`
+		};
+	}
+});
+
+export const uploadFile = createTool({
+	id: 'browser-upload',
+	description:
+		'Upload one or more files via a file input element WITHOUT opening the OS file picker dialog. ' +
+		'Use this instead of browser-fill or browser-click for ANY file upload input. ' +
+		'The selector should target the upload button, drop zone, or file input. ' +
+		'Pass the absolute file path(s) as a comma-separated string for multiple files. ' +
+		'This is the ONLY correct way to upload files — never use browser-click on upload buttons ' +
+		'as that opens a native file picker the agent cannot interact with.',
+	inputSchema: z.object({
+		selector: z
+			.string()
+			.describe(
+				'CSS selector or snapshot ref of the file upload button, drop zone, or input[type="file"] element (e.g. "@e5", "input[type=\'file\']", ".upload-button")'
+			),
+		files: z
+			.string()
+			.describe(
+				'Absolute path to the file to upload. For multiple files, separate paths with a comma (e.g. "/path/a.pdf,/path/b.pdf")'
+			)
+	}),
+	outputSchema: z.object({
+		success: z.boolean(),
+		message: z.string()
+	}),
+	execute: async ({ selector, files }) => {
+		const result = await browserExec(['upload', selector, files], { timeout: 60_000 });
+		return {
+			success: result.success,
+			message: result.success
+				? `Uploaded file(s) "${files}" via ${selector}`
+				: `Failed to upload file(s) via ${selector}: ${result.stderr}`
 		};
 	}
 });

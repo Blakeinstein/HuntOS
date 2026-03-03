@@ -19,6 +19,7 @@ import type { AgentConfig, ToolsInput } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
+import { env } from '$env/dynamic/private';
 import { promptRegistry } from '../prompts/load';
 import { resolveModel } from '../providers';
 
@@ -86,8 +87,8 @@ export type CreateAgentOptions = Omit<
 	dynamicContext?: DynamicContextFn;
 };
 
-/** Fallback model used when no model string is provided or the env var is unset. */
-const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? 'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
+/** Hardcoded fallback if DEFAULT_MODEL env var is also unset. */
+const HARDCODED_FALLBACK = 'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
 
 /**
  * Factory that creates a Mastra Agent with multi-provider model support.
@@ -120,7 +121,7 @@ export function createAgent({
 		})
 	});
 
-	const resolvedModel = resolveModel(model ?? DEFAULT_MODEL);
+	const resolvedModel = resolveModel(model ?? env.DEFAULT_MODEL ?? HARDCODED_FALLBACK);
 
 	// When dynamicContext is provided, instructions become a function that
 	// fetches the prompt from the registry with injected runtime context.

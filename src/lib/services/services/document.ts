@@ -7,8 +7,8 @@ import type { Database } from './database';
 import type { AuditLogService } from './auditLog';
 import { MDocument } from '@mastra/rag';
 import { embedMany, embed } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { OPENROUTER_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
+import { resolveEmbeddingModel } from '$lib/mastra/providers';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -49,12 +49,14 @@ export interface CreateDocumentOptions {
 export type DocumentContentType = 'text' | 'pdf' | 'html' | 'markdown';
 
 // Embedding model configuration
-// Using OpenRouter with OpenAI's text-embedding-3-small model.
+// Format: <provider>/<model-path> — resolved via the provider registry.
 // 384 dimensions — must match the vec0 table definition in database.ts.
-// We pass dimensions via the AI SDK `experimental_providerOptions` so the
-// upstream provider truncates the vector server-side.
+// We pass dimensions via the AI SDK `providerOptions` so the upstream
+// provider truncates the vector server-side.
 const EMBEDDING_DIMENSIONS = 384;
-const EMBEDDING_MODEL = 'openai/text-embedding-3-small';
+function getEmbeddingModel(): string {
+	return env.EMBEDDING_MODEL ?? 'openrouter/openai/text-embedding-3-small';
+}
 
 // Chunking defaults
 const DEFAULT_CHUNK_MAX_SIZE = 512;
@@ -310,15 +312,18 @@ export class DocumentService {
 	}
 
 	/**
-	 * Generate embeddings for multiple texts using the AI SDK via OpenRouter.
+	 * Generate embeddings for multiple texts using the AI SDK.
+	 * The embedding provider is determined by the EMBEDDING_MODEL env var
+	 * via the provider registry (e.g. "openai/text-embedding-3-small",
+	 * "ollama/nomic-embed-text", etc.).
 	 */
 	private async embedTexts(texts: string[]): Promise<number[][]> {
 		if (texts.length === 0) return [];
 
-		const openrouter = createOpenRouter({ apiKey: OPENROUTER_API_KEY });
+		const model = resolveEmbeddingModel(getEmbeddingModel());
 
 		const { embeddings } = await embedMany({
-			model: openrouter.textEmbeddingModel(EMBEDDING_MODEL),
+			model,
 			values: texts,
 			providerOptions: {
 				openai: { dimensions: EMBEDDING_DIMENSIONS }
@@ -332,10 +337,10 @@ export class DocumentService {
 	 * Generate a single embedding for a query string.
 	 */
 	private async embedSingle(text: string): Promise<number[]> {
-		const openrouter = createOpenRouter({ apiKey: OPENROUTER_API_KEY });
+		const model = resolveEmbeddingModel(getEmbeddingModel());
 
 		const { embedding } = await embed({
-			model: openrouter.textEmbeddingModel(EMBEDDING_MODEL),
+			model,
 			value: text,
 			providerOptions: {
 				openai: { dimensions: EMBEDDING_DIMENSIONS }

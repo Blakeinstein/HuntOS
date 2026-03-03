@@ -21,14 +21,22 @@
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOllama } from 'ollama-ai-provider-v2';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type { OpenAICompatibleProviderSettings } from '@ai-sdk/openai-compatible';
 import type { MastraModelConfig } from '@mastra/core/llm';
+import type { EmbeddingModel } from 'ai';
+import type { LanguageModelV3 } from '@ai-sdk/provider';
 
 // ---------------------------------------------------------------------------
-// Env helpers — read at call time so tests can override process.env
+// Env helpers — use SvelteKit's $env/dynamic/private so .env values are
+// available at runtime (process.env is NOT populated by Vite for .env files).
+// These are called lazily at resolve-time, never at module-load time.
 // ---------------------------------------------------------------------------
+
+import { env as svelteEnv } from '$env/dynamic/private';
 
 function env(key: string): string | undefined {
-	return process.env[key];
+	return svelteEnv[key];
 }
 
 function requireEnv(key: string): string {
@@ -40,6 +48,21 @@ function requireEnv(key: string): string {
 // ---------------------------------------------------------------------------
 // Provider-specific factory functions
 // ---------------------------------------------------------------------------
+
+/**
+ * Ensures the LMStudio base URL ends with `/v1`.
+ *
+ * Users commonly set `LMSTUDIO_BASE_URL=http://host:1234` without the `/v1`
+ * suffix, but the AI SDK appends paths like `/chat/completions` directly to
+ * the base URL. Without `/v1` the resulting URL hits an invalid endpoint and
+ * LMStudio responds with "Unexpected endpoint or method".
+ */
+function normalizeLMStudioBaseURL(raw: string): string {
+	// Strip trailing slashes for consistent comparison
+	const trimmed = raw.replace(/\/+$/, '');
+	if (trimmed.endsWith('/v1')) return trimmed;
+	return `${trimmed}/v1`;
+}
 
 /**
  * OpenRouter — passes the full "openrouter/..." string as-is to the SDK.
@@ -67,24 +90,31 @@ function resolveOpenAI(modelPath: string): MastraModelConfig {
 }
 
 /**
- * LMStudio — Mastra's built-in model router accepts the full prefixed string.
- * Optionally override the server URL via LMSTUDIO_BASE_URL.
+ * LMStudio — uses @ai-sdk/openai-compatible with supportsStructuredOutputs: false.
  *
- * e.g. "lmstudio/qwen/qwen3-30b-a3b-2507"
- * With URL override: uses @ai-sdk/openai compat against the custom base URL.
+ * LMStudio does not support the OpenAI `json_schema` response format used by
+ * `generateObject` when structured outputs are enabled. Setting
+ * `supportsStructuredOutputs: false` makes the AI SDK fall back to plain
+ * `json` mode (response_format: { type: "json_object" }) which LMStudio
+ * handles correctly.
+ *
+ * e.g. "lmstudio/qwen/qwen3.5-35b-a3b" → lmstudio("qwen/qwen3.5-35b-a3b")
  */
-function resolveLMStudio(fullModelId: string): MastraModelConfig {
-	const baseURL = env('LMSTUDIO_BASE_URL');
-	const apiKey = env('LMSTUDIO_API_KEY') ?? 'lmstudio'; // LMStudio doesn't require a real key
+function resolveLMStudio(modelPath: string): MastraModelConfig {
+	const baseURL = normalizeLMStudioBaseURL(env('LMSTUDIO_BASE_URL') ?? 'http://127.0.0.1:1234/v1');
 
-	if (baseURL) {
-		// When a custom base URL is set, use @ai-sdk/openai compat pointed at LMStudio's server
-		const client = createOpenAI({ apiKey, baseURL });
-		return client(fullModelId) as MastraModelConfig;
-	}
+	const settings: OpenAICompatibleProviderSettings = {
+		name: 'lmstudio',
+		baseURL,
+		// LMStudio supports response_format: { type: "json_schema" } but
+		// rejects { type: "json_object" }.  Setting this to true makes the
+		// AI SDK use json_schema mode in generateObject, which is what
+		// LMStudio expects.
+		supportsStructuredOutputs: true
+	};
 
-	// Fall through to Mastra's model router string — passed through as-is
-	return fullModelId as MastraModelConfig;
+	const client = createOpenAICompatible(settings);
+	return client(modelPath) as MastraModelConfig;
 }
 
 /**
@@ -94,17 +124,13 @@ function resolveLMStudio(fullModelId: string): MastraModelConfig {
  * e.g. "github-models/openai/gpt-4o"
  */
 function resolveGitHubModels(fullModelId: string): MastraModelConfig {
-	const baseURL = env('GITHUB_MODELS_BASE_URL');
+	const baseURL = env('GITHUB_MODELS_BASE_URL') ?? 'https://models.github.ai/inference';
 	const token = requireEnv('GITHUB_TOKEN');
 
-	if (baseURL) {
-		// Custom base URL: use @ai-sdk/openai compat with GitHub token as API key
-		const client = createOpenAI({ apiKey: token, baseURL });
-		return client(fullModelId) as MastraModelConfig;
-	}
-
-	// Fall through to Mastra's model router string
-	return fullModelId as MastraModelConfig;
+	// Always construct a real OpenAI-compat client so the result is a proper
+	// LanguageModel object (not a Mastra router string).
+	const client = createOpenAI({ apiKey: token, baseURL });
+	return client(fullModelId) as MastraModelConfig;
 }
 
 /**
@@ -153,7 +179,7 @@ type ProviderHandler = (modelPath: string, fullModelId: string) => MastraModelCo
 const PROVIDER_HANDLERS: Record<string, ProviderHandler> = {
 	openrouter: (modelPath) => resolveOpenRouter(modelPath),
 	openai: (modelPath) => resolveOpenAI(modelPath),
-	lmstudio: (_modelPath, fullModelId) => resolveLMStudio(fullModelId),
+	lmstudio: (modelPath) => resolveLMStudio(modelPath),
 	'github-models': (_modelPath, fullModelId) => resolveGitHubModels(fullModelId),
 	ollama: (modelPath) => resolveOllama(modelPath),
 	'z-ai': (modelPath, fullModelId) => resolveZAI(modelPath, fullModelId)
@@ -215,6 +241,141 @@ export function resolveModel(modelId: string): MastraModelConfig {
 	}
 
 	return handler(modelPath, modelId);
+}
+
+/**
+ * Like {@link resolveModel} but returns a strict `LanguageModelV3` suitable
+ * for use with `wrapLanguageModel()` and other AI SDK helpers that require
+ * an actual model object rather than a Mastra router string.
+ *
+ * Throws if the resolved value is a plain string (Mastra router id) instead
+ * of a real model object — this should not happen with the current provider
+ * implementations since LMStudio / GitHub Models always construct a real
+ * OpenAI-compat client, but the guard is here for safety.
+ *
+ * @example
+ * ```ts
+ * import { wrapLanguageModel, extractReasoningMiddleware } from 'ai';
+ * const base = resolveLanguageModel('lmstudio/qwen/qwen3.5-35b-a3b');
+ * const model = wrapLanguageModel({
+ *   model: base,
+ *   middleware: [extractReasoningMiddleware({ tagName: 'think' })],
+ * });
+ * ```
+ */
+export function resolveLanguageModel(modelId: string): LanguageModelV3 {
+	const resolved = resolveModel(modelId);
+
+	if (typeof resolved === 'string') {
+		throw new Error(
+			`[providers] resolveLanguageModel("${modelId}") returned a Mastra router ` +
+				`string instead of a model object.  This provider may not support ` +
+				`direct SDK usage.  Set the provider's BASE_URL env var to force ` +
+				`construction of a real client.`
+		);
+	}
+
+	return resolved as unknown as LanguageModelV3;
+}
+
+// ---------------------------------------------------------------------------
+// Embedding model resolution
+// ---------------------------------------------------------------------------
+
+type EmbeddingHandler = (modelPath: string) => EmbeddingModel;
+
+/**
+ * Provider-specific embedding model factories.
+ *
+ * Not every provider supports embeddings — only OpenRouter, OpenAI, Ollama,
+ * and Z.AI (via OpenAI compat) are wired here.  LMStudio and GitHub Models
+ * can be added when their SDKs expose an embedding endpoint.
+ */
+const EMBEDDING_HANDLERS: Record<string, EmbeddingHandler> = {
+	openrouter: (modelPath) => {
+		const apiKey = requireEnv('OPENROUTER_API_KEY');
+		const baseURL = env('OPENROUTER_BASE_URL');
+		const client = createOpenRouter({ apiKey, ...(baseURL ? { baseURL } : {}) });
+		return client.textEmbeddingModel(modelPath);
+	},
+	openai: (modelPath) => {
+		const apiKey = requireEnv('OPENAI_API_KEY');
+		const baseURL = env('OPENAI_BASE_URL');
+		const client = createOpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+		return client.textEmbeddingModel(modelPath);
+	},
+	ollama: (modelPath) => {
+		const baseURL = env('OLLAMA_BASE_URL');
+		const client = createOllama({ ...(baseURL ? { baseURL } : {}) });
+		return client.textEmbeddingModel(modelPath);
+	},
+	lmstudio: (modelPath) => {
+		const baseURL = normalizeLMStudioBaseURL(
+			env('LMSTUDIO_BASE_URL') ?? 'http://127.0.0.1:1234/v1'
+		);
+		// LM Studio requires @ai-sdk/openai-compatible — the generic OpenAI
+		// provider does not wire up the embeddings endpoint correctly for it.
+		// supportsStructuredOutputs is irrelevant for embedding models.
+		const client = createOpenAICompatible({ name: 'lmstudio', baseURL });
+		return client.embeddingModel(modelPath);
+	},
+	'z-ai': (modelPath) => {
+		const zaiKey = env('ZAI_API_KEY');
+		if (zaiKey) {
+			const baseURL = env('ZAI_BASE_URL') ?? 'https://open.bigmodel.cn/api/paas/v4/';
+			const client = createOpenAI({ apiKey: zaiKey, baseURL });
+			return client.textEmbeddingModel(modelPath);
+		}
+		// Fallback through OpenRouter
+		const apiKey = requireEnv('OPENROUTER_API_KEY');
+		const baseURL = env('OPENROUTER_BASE_URL');
+		const client = createOpenRouter({ apiKey, ...(baseURL ? { baseURL } : {}) });
+		return client.textEmbeddingModel(`z-ai/${modelPath}`);
+	}
+};
+
+/**
+ * Resolves a provider-qualified embedding model string into an AI SDK
+ * EmbeddingModel instance, using the same `<provider>/<model-path>` format
+ * as {@link resolveModel}.
+ *
+ * @example
+ * ```ts
+ * const emb = resolveEmbeddingModel('openai/text-embedding-3-small');
+ * const emb = resolveEmbeddingModel('openrouter/openai/text-embedding-3-small');
+ * const emb = resolveEmbeddingModel('ollama/nomic-embed-text');
+ * ```
+ */
+export function resolveEmbeddingModel(modelId: string): EmbeddingModel {
+	const slashIdx = modelId.indexOf('/');
+	if (slashIdx === -1) {
+		throw new Error(
+			`[providers] Invalid embedding model string "${modelId}". ` +
+				`Expected format: "<provider>/<model-path>" ` +
+				`(e.g. "openai/text-embedding-3-small", "ollama/nomic-embed-text")`
+		);
+	}
+
+	let provider: string;
+	let modelPath: string;
+
+	if (modelId.startsWith('github-models/')) {
+		provider = 'github-models';
+		modelPath = modelId.slice('github-models/'.length);
+	} else {
+		provider = modelId.slice(0, slashIdx);
+		modelPath = modelId.slice(slashIdx + 1);
+	}
+
+	const handler = EMBEDDING_HANDLERS[provider];
+	if (!handler) {
+		throw new Error(
+			`[providers] Provider "${provider}" does not support embedding models, ` +
+				`or is unknown. Supported embedding providers: ${Object.keys(EMBEDDING_HANDLERS).join(', ')}`
+		);
+	}
+
+	return handler(modelPath);
 }
 
 /**

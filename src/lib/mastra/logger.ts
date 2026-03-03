@@ -11,5 +11,9 @@ import { PinoLogger } from '@mastra/loggers';
  */
 export const logger = new PinoLogger({
 	name: 'AutoJobApp',
-	level: 'debug'
+	level: 'debug',
+	redact: {
+		paths: ['model'], // Redact the "model" field from logs
+		remove: true // Completely remove the redacted field
+	}
 });

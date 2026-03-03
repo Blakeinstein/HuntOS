@@ -44,11 +44,17 @@ import {
 import { resolveSiteInstructions } from '$lib/mastra/agents/job-application-agent/site-instructions';
 import { RequestContext } from '@mastra/core/request-context';
 import type { JobApplicationRequestContext } from '$lib/mastra/agents/job-application-agent/types';
+import { logLLMError } from '$lib/services/helpers/formatLLMError';
 import fs from 'fs';
 import { PIPELINE_STEPS } from './applicationPipeline';
 import { browserExec } from '$lib/mastra/tools/browser/exec';
 import { search } from 'search-ai-core';
 import path from 'path';
+import {
+	buildRunScreenshotDir,
+	ensureRunScreenshotDir,
+	captureIterationScreenshot
+} from '$lib/services/helpers/screenshotRun';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -1185,11 +1191,22 @@ export class ApplyPipelineExecutor {
 		} catch (error) {
 			if (error instanceof CancellationError) throw error;
 
+			// Log full AI SDK error chain to server stdout before reducing to a
+			// short message — the pipeline UI log only shows error.message which
+			// loses the JSONParseError cause, raw model text, finishReason, etc.
+			const { summary } = logLLMError(error, '[Pipeline][resume]', {
+				applicationId: application.id,
+				company: application.company,
+				title: application.title,
+				model: this.appSettingsService.resumeFormat
+			});
+
 			const message = error instanceof Error ? error.message : String(error);
 			this.log(runId, step, `Resume generation failed: ${message}`, 'error');
+			this.log(runId, step, `Server detail: ${summary}`, 'error');
 			finishStepAudit({
 				status: 'error',
-				detail: `Resume generation failed: ${message}`
+				detail: `Resume generation failed: ${summary}`
 			});
 			throw new Error(`Resume step failed: ${message}`);
 		}
@@ -1289,6 +1306,11 @@ export class ApplyPipelineExecutor {
 
 			this.checkCancelled(runId);
 
+			// ── Set up per-run screenshot directory ──────────────────
+			const screenshotRunDir = buildRunScreenshotDir(runId, application.company, application.title);
+			ensureRunScreenshotDir(screenshotRunDir);
+			this.log(runId, step, `Screenshot dir: ${screenshotRunDir}`, 'progress');
+
 			// ── Run the agent ────────────────────────────────────────
 			this.log(runId, step, `Launching application agent (${site}) on: ${url}`, 'progress');
 
@@ -1337,7 +1359,7 @@ export class ApplyPipelineExecutor {
 							'progress'
 						);
 					},
-					onIterationComplete: (info: IterationInfo) => {
+					onIterationComplete: async (info: IterationInfo) => {
 						// Summary line
 						this.log(
 							runId,
@@ -1363,6 +1385,17 @@ export class ApplyPipelineExecutor {
 						if (info.reasoningText) {
 							this.log(runId, step, `Agent reasoning: ${info.reasoningText}`, 'progress');
 						}
+
+						// ── Per-iteration annotated screenshot ───────
+						// Captured outside the agent so it always runs even when the
+						// agent gets stuck or produces no output.
+						await captureIterationScreenshot(screenshotRunDir, info.iteration, 'after');
+						this.log(
+							runId,
+							step,
+							`Screenshot saved: iter-${String(info.iteration).padStart(2, '0')}-after.png`,
+							'progress'
+						);
 					}
 				});
 
@@ -1374,6 +1407,10 @@ export class ApplyPipelineExecutor {
 						`${loopResult.totalToolCalls} total tool calls`,
 					'progress'
 				);
+
+				// ── Final screenshot after loop completes ────────────
+				await captureIterationScreenshot(screenshotRunDir, loopResult.iterations, 'final');
+				this.log(runId, step, `Final screenshot saved: final.png`, 'progress');
 
 				if (loopResult.result) {
 					appResult = loopResult.result;

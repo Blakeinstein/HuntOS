@@ -1,6 +1,7 @@
 import { generateObject, generateText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { OPENROUTER_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
+import { resolveLanguageModel } from '$lib/mastra/providers';
+import { logLLMError } from '$lib/services/helpers/formatLLMError';
 import type { ProfileService, ProfileData } from './profile';
 import { typstResumeDataSchema, type TypstResumeData } from '../resume/typstSchema';
 import untruncateJson from 'untruncate-json';
@@ -18,7 +19,7 @@ const __dirname = path.dirname(__filename);
 // ── Types ────────────────────────────────────────────────────────
 
 export interface TypstResumeConfig {
-	/** OpenRouter model identifier */
+	/** Provider-qualified model string (e.g. "openrouter/qwen/qwen3-30b-a3b-instruct-2507") */
 	model: string;
 	/** Request timeout in milliseconds (default: 120_000) */
 	timeoutMs: number;
@@ -39,12 +40,17 @@ export interface TypstResumeResult {
 	templateName: string;
 }
 
-const DEFAULT_CONFIG: TypstResumeConfig = {
-	model: 'qwen/qwen3-30b-a3b-instruct-2507',
-	timeoutMs: 120_000,
-	maxOutputTokens: 16_384,
-	nnjrDir: path.resolve(process.cwd(), 'vendor/NNJR')
-};
+function getDefaultConfig(): TypstResumeConfig {
+	return {
+		model:
+			env.RESUME_SERVICE_MODEL ??
+			env.DEFAULT_MODEL ??
+			'openrouter/qwen/qwen3-30b-a3b-instruct-2507',
+		timeoutMs: 120_000,
+		maxOutputTokens: 16_384,
+		nnjrDir: path.resolve(process.cwd(), 'vendor/NNJR')
+	};
+}
 
 // ── Service ──────────────────────────────────────────────────────
 
@@ -62,13 +68,11 @@ const DEFAULT_CONFIG: TypstResumeConfig = {
 export class TypstResumeService {
 	private profileService: ProfileService;
 	private config: TypstResumeConfig;
-	private openrouter: ReturnType<typeof createOpenRouter>;
 	private promptTemplate: string | null = null;
 
 	constructor(profileService: ProfileService, config?: Partial<TypstResumeConfig>) {
 		this.profileService = profileService;
-		this.config = { ...DEFAULT_CONFIG, ...config };
-		this.openrouter = createOpenRouter({ apiKey: OPENROUTER_API_KEY });
+		this.config = { ...getDefaultConfig(), ...config };
 	}
 
 	// ── Public API ────────────────────────────────────────────────
@@ -112,7 +116,7 @@ export class TypstResumeService {
 	 * generateText fallback.
 	 */
 	private async callLLM(prompt: string): Promise<TypstResumeData> {
-		const baseModel = this.openrouter(this.config.model);
+		const baseModel = resolveLanguageModel(this.config.model);
 
 		const model = wrapLanguageModel({
 			model: baseModel,
@@ -125,6 +129,7 @@ export class TypstResumeService {
 		};
 
 		// ── Primary: generateObject ───────────────────────────────
+		let primaryError: unknown;
 		try {
 			const result = await generateObject({
 				model,
@@ -135,13 +140,17 @@ export class TypstResumeService {
 				prompt,
 				...sharedSettings,
 
+				// experimental_repairText must return a string (not null).
+				// If our repair helper cannot fix the text we return the
+				// stripped/raw text as-is so the SDK still gets a string and
+				// can throw a proper validation error rather than a null-ref.
 				experimental_repairText: async ({ text }) => {
 					console.warn(
 						'[TypstResume] repairText invoked — attempting repair…',
 						'text length:',
 						text.length
 					);
-					return this.repairJson(text);
+					return this.repairJson(text) ?? text;
 				}
 			});
 
@@ -154,10 +163,11 @@ export class TypstResumeService {
 			}
 
 			return result.object;
-		} catch (primaryError) {
+		} catch (err) {
+			primaryError = err;
 			console.warn(
 				'[TypstResume] generateObject failed, falling back to generateText:',
-				primaryError instanceof Error ? primaryError.message : primaryError
+				err instanceof Error ? err.message : err
 			);
 		}
 
@@ -178,26 +188,39 @@ export class TypstResumeService {
 
 		const json = this.extractAndRepairJson(text);
 		if (!json) {
+			const { summary: primarySummary } = logLLMError(
+				primaryError,
+				'[TypstResume][generateObject]'
+			);
 			console.error(
-				'[TypstResume] Could not extract JSON from LLM response.',
+				'[TypstResume][generateText fallback] Could not extract JSON from response.',
 				`finishReason=${finishReason}`,
-				'Raw text (first 2000 chars):',
+				'Raw text (first 2000 chars):\n',
 				text.slice(0, 2000)
 			);
 			throw new Error(
-				`Typst resume generation failed: the model did not return valid JSON (finishReason=${finishReason}).`
+				`Typst resume generation failed: model did not return parseable JSON ` +
+					`(finishReason=${finishReason}). generateObject failure: ${primarySummary}`
 			);
 		}
 
 		const result = typstResumeDataSchema.safeParse(json);
 		if (!result.success) {
+			const { summary: primarySummary } = logLLMError(
+				primaryError,
+				'[TypstResume][generateObject]'
+			);
 			console.error(
-				'[TypstResume] Extracted JSON did not match schema.',
-				'Validation errors:',
-				JSON.stringify(result.error.issues ?? result.error, null, 2)
+				'[TypstResume][generateText fallback] Extracted JSON did not match schema.',
+				`finishReason=${finishReason}`,
+				'Validation errors:\n',
+				JSON.stringify(result.error.issues ?? result.error, null, 2),
+				'\nExtracted JSON (first 2000 chars):\n',
+				JSON.stringify(json).slice(0, 2000)
 			);
 			throw new Error(
-				`Typst resume generation failed: JSON did not match the expected schema (finishReason=${finishReason}).`
+				`Typst resume generation failed: JSON did not match the expected schema ` +
+					`(finishReason=${finishReason}). generateObject failure: ${primarySummary}`
 			);
 		}
 

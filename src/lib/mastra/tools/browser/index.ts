@@ -23,7 +23,8 @@ import {
 	hover,
 	select,
 	check,
-	uncheck
+	uncheck,
+	uploadFile
 } from './interaction';
 
 import {
@@ -55,14 +56,7 @@ import {
 	findNth
 } from './wait';
 
-import {
-	listTabs,
-	newTab,
-	switchTab,
-	closeTab,
-	switchToFrame,
-	switchToMainFrame
-} from './tabs';
+import { listTabs, newTab, switchTab, closeTab, switchToFrame, switchToMainFrame } from './tabs';
 
 // Individual exports for selective usage
 export {
@@ -87,6 +81,7 @@ export {
 	select,
 	check,
 	uncheck,
+	uploadFile,
 	// Extraction
 	getText,
 	getHtml,
@@ -156,6 +151,7 @@ export const browserTools = {
 	select,
 	check,
 	uncheck,
+	uploadFile,
 	// Extraction
 	getText,
 	getHtml,

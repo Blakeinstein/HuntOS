@@ -6,8 +6,11 @@ import { z } from 'zod';
  * Status of a discovered form field during the application process.
  */
 export const fieldStatusEnum = z
-	.enum(['filled', 'missing', 'skipped', 'error'])
-	.describe('The outcome of attempting to fill this field');
+	.enum(['filled', 'missing', 'skipped', 'error', 'best_fit'])
+	.describe(
+		'The outcome of attempting to fill this field. ' +
+			'"best_fit" means profile data was unavailable so the most neutral/reasonable available option was chosen.'
+	);
 
 export type FieldStatus = z.infer<typeof fieldStatusEnum>;
 
