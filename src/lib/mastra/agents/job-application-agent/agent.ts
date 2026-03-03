@@ -3,7 +3,8 @@ import { withToolLoggingAll, type ToolLoggingOptions } from '../../tools/with-lo
 import { createAgent } from '../create-agent';
 import { jobApplicationRequestContextSchema, type JobApplicationRequestContext } from './types';
 
-const ORCHESTRATOR_MODEL = 'qwen/qwen3.5-flash-02-23';
+const ORCHESTRATOR_MODEL =
+	process.env.JOB_APPLICATION_AGENT_MODEL ?? 'openrouter/qwen/qwen3.5-flash-02-23';
 /**
  * Creates the unified job application agent.
  *

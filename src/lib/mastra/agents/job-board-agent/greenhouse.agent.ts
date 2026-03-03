@@ -1,4 +1,9 @@
 import { browserTools } from '../../tools/browser';
+
+const GREENHOUSE_AGENT_MODEL =
+	process.env.JOB_BOARD_GREENHOUSE_MODEL ??
+	process.env.JOB_BOARD_AGENT_MODEL ??
+	'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
 import { withToolLoggingAll } from '../../tools/with-logging';
 import { createAgent } from '../create-agent';
 import {
@@ -38,6 +43,7 @@ export function createGreenhouseAgent() {
 	return createAgent({
 		id: 'job-board-agent.greenhouse',
 		name: 'Greenhouse Scraping Agent',
+		model: GREENHOUSE_AGENT_MODEL,
 		requestContextSchema: jobBoardRequestContextSchema,
 		dynamicContext: ({ requestContext }) => ({
 			'Target URL': `\`${requestContext.get('job-board-url') as JobBoardRequestContext['job-board-url']}\``,

@@ -1,4 +1,7 @@
 import { createAgent } from '../create-agent';
+
+const JOB_BOARD_AGENT_MODEL =
+	process.env.JOB_BOARD_AGENT_MODEL ?? 'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
 import { SubAgentRegistry } from './registry';
 import { createLinkedInAgent } from './linkedin.agent';
 import { createGreenhouseAgent } from './greenhouse.agent';
@@ -83,6 +86,7 @@ export function createJobBoardAgent() {
 	return createAgent({
 		id: 'job-board-agent',
 		name: 'Job Board Orchestrator Agent',
+		model: JOB_BOARD_AGENT_MODEL,
 		requestContextSchema: jobBoardRequestContextSchema,
 		dynamicContext: ({ requestContext }) => ({
 			'Target URL': `\`${requestContext.get('job-board-url') as JobBoardRequestContext['job-board-url']}\``,

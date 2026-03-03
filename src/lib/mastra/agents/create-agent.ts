@@ -1,22 +1,26 @@
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+// src/lib/mastra/agents/create-agent.ts
+// Central agent factory — creates Mastra Agents with multi-provider model support.
+//
+// Models are resolved via the provider registry using a "provider/model-path"
+// string read from environment variables. Each agent file defines its own
+// env var name (e.g. PROFILE_AGENT_MODEL) so models can be swapped per-agent
+// without touching code.
+//
+// Supported provider prefixes: openrouter, openai, lmstudio, github-models, ollama, z-ai
+// Format: "openrouter/qwen/qwen3-30b-a3b-instruct-2507"
+//         "lmstudio/qwen/qwen3-30b-a3b-2507"
+//         "github-models/openai/gpt-4o"
+//         "openai/gpt-4o"
+//         "ollama/llama3.2"
+//         "z-ai/glm-4.7-flash"
+
 import { Agent } from '@mastra/core/agent';
 import type { AgentConfig, ToolsInput } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
-import { OPENROUTER_API_KEY } from '$env/static/private';
 import { promptRegistry } from '../prompts/load';
-
-/**
- * Central OpenRouter instance shared by all agents.
- * Import this from here instead of creating new instances per agent.
- */
-export const openrouter = createOpenRouter({
-	apiKey: OPENROUTER_API_KEY
-});
-
-/** The default model used by all agents unless overridden. */
-const DEFAULT_MODEL = 'qwen/qwen3-30b-a3b-instruct-2507';
+import { resolveModel } from '../providers';
 
 /**
  * Dynamic context entries that get appended to the base prompt
@@ -44,11 +48,23 @@ export type CreateAgentOptions = Omit<
 	 * `src/lib/mastra/prompts/profile-agent.md`.
 	 */
 	id: string;
+
 	/**
-	 * OpenRouter model identifier (e.g. "google/gemini-2.5-flash").
-	 * Defaults to "minimax/minimax-m2.5" if not provided.
+	 * A fully-qualified model string in the format `<provider>/<model-path>`.
+	 *
+	 * This should be read from an environment variable in the calling agent file
+	 * so that models can be swapped without code changes.
+	 *
+	 * Falls back to the DEFAULT_MODEL constant if not provided.
+	 *
+	 * @example
+	 * ```ts
+	 * import { env } from '$env/dynamic/private';
+	 * createAgent({ model: env.PROFILE_AGENT_MODEL ?? 'openrouter/qwen/qwen3-30b-a3b-instruct-2507' })
+	 * ```
 	 */
 	model?: string;
+
 	/**
 	 * Optional function that receives `{ requestContext }` and returns a
 	 * `Record<string, string>` of dynamic context sections to inject into the
@@ -70,11 +86,19 @@ export type CreateAgentOptions = Omit<
 	dynamicContext?: DynamicContextFn;
 };
 
+/** Fallback model used when no model string is provided or the env var is unset. */
+const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? 'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
+
 /**
- * Factory that creates a Mastra Agent.
+ * Factory that creates a Mastra Agent with multi-provider model support.
  *
- * Instructions are loaded from `src/lib/mastra/prompts/{id}.md` via the prompt
- * registry so prompts can be edited as plain markdown without touching code.
+ * The `model` parameter accepts a provider-qualified string such as
+ * `"openrouter/qwen/qwen3-30b"` or `"ollama/llama3.2"`. The provider
+ * registry resolves this to the correct AI SDK LanguageModel instance.
+ *
+ * Instructions are loaded from `src/lib/mastra/prompts/{id}.md` via the
+ * prompt registry so prompts can be edited as plain markdown without
+ * touching code.
  *
  * When `dynamicContext` is provided, `instructions` becomes a function that
  * reads `requestContext` at runtime, builds context sections, and appends
@@ -95,7 +119,8 @@ export function createAgent({
 			url: 'file:./data/memory.db'
 		})
 	});
-	const resolvedModel = openrouter(model ?? DEFAULT_MODEL);
+
+	const resolvedModel = resolveModel(model ?? DEFAULT_MODEL);
 
 	// When dynamicContext is provided, instructions become a function that
 	// fetches the prompt from the registry with injected runtime context.

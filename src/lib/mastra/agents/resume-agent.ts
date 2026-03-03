@@ -15,7 +15,7 @@ import { createGenerateResumeTool, createListTemplatesTool } from '../tools/resu
 import { withToolLogging } from '../tools/with-logging';
 import { createAgent } from './create-agent';
 
-const RESUME_MODEL = 'z-ai/glm-4.7-flash';
+const RESUME_MODEL = process.env.RESUME_AGENT_MODEL ?? 'z-ai/glm-4.7-flash';
 
 export function createResumeAgent(
 	profileService: ProfileService,

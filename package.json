@@ -18,6 +18,7 @@
 		"ab": "agent-browser"
 	},
 	"dependencies": {
+		"@ai-sdk/openai": "^3.0.39",
 		"@ai-sdk/svelte": "^4.0.86",
 		"@lucide/svelte": "^0.564.0",
 		"@mastra/ai-sdk": "^1.0.4",
@@ -33,6 +34,7 @@
 		"handlebars": "^4.7.8",
 		"mammoth": "^1.11.0",
 		"mastra": "^1.3.1",
+		"ollama-ai-provider-v2": "^3.3.1",
 		"pdf-parse-new": "^2.0.0",
 		"search-ai-core": "^0.0.1",
 		"sqlite-vec": "^0.1.7-alpha.2",

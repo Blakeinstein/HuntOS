@@ -20,7 +20,7 @@ import {
 import { withToolLogging } from '../tools/with-logging';
 import { createAgent } from './create-agent';
 
-const PROFILE_MODEL = 'z-ai/glm-4.7-flash';
+const PROFILE_MODEL = process.env.PROFILE_AGENT_MODEL ?? 'z-ai/glm-4.7-flash';
 
 export function createProfileAgent(
 	profileService: ProfileService,
