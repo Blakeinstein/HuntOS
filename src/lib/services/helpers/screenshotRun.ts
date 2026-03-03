@@ -2,15 +2,15 @@
 //
 // Per-application-run screenshot capture helper.
 //
-// Creates a dedicated subfolder under data/screenshots for each pipeline run
+// Creates a dedicated subfolder under data/logs/screenshots for each pipeline run
 // and captures a full-page annotated screenshot (numbered element labels) after
 // every agent iteration. Screenshots are taken *outside* the agent — directly
 // from pipeline code via browserExec — so they are always captured even if the
 // agent itself fails or gets stuck.
 //
 // Directory structure:
-//   data/screenshots/
-//     run-<runId>-<company>-<title>-<timestamp>/
+//   data/logs/screenshots/
+//     <company>-<runId>/
 //       iter-01-before.png
 //       iter-01-after.png
 //       iter-02-after.png
@@ -24,7 +24,7 @@ import path from 'path';
 import { browserExec } from '$lib/mastra/tools/browser/exec';
 
 // Root directory for all run screenshot folders, relative to cwd (project root).
-const SCREENSHOTS_ROOT = path.join('data', 'screenshots');
+const SCREENSHOTS_ROOT = path.join('data', 'logs', 'screenshots');
 
 /**
  * Sanitise a string for use as a filesystem path component.
@@ -42,30 +42,23 @@ function sanitise(value: string, maxLen = 40): string {
 /**
  * Build a run-specific screenshot directory path (does not create it yet).
  *
- * Format: data/screenshots/run-<runId>-<company>-<title>-<yyyymmdd-HHMMss>
+ * Format: data/logs/screenshots/<company>-<runId>/
+ *
+ * Grouping by company first makes it easy to browse all runs for a given
+ * employer in a file explorer without wading through a flat timestamped list.
  */
-export function buildRunScreenshotDir(
-	runId: number,
-	company: string,
-	title: string
-): string {
-	const ts = new Date()
-		.toISOString()
-		.replace(/[-:]/g, '')
-		.replace('T', '-')
-		.slice(0, 15); // "20250615-143022"
-
-	const slug = `run-${runId}-${sanitise(company)}-${sanitise(title)}-${ts}`;
-	return path.join(SCREENSHOTS_ROOT, slug);
+export function buildRunScreenshotDir(runId: number, company: string, title: string): string {
+	const companySlug = sanitise(company);
+	const titleSlug = sanitise(title);
+	return path.join(SCREENSHOTS_ROOT, `${companySlug}-${runId}`, titleSlug);
 }
 
 /**
  * Ensure the screenshots root and the run-specific subdirectory both exist.
  */
 export function ensureRunScreenshotDir(runDir: string): void {
-	if (!fs.existsSync(SCREENSHOTS_ROOT)) {
-		fs.mkdirSync(SCREENSHOTS_ROOT, { recursive: true });
-	}
+	// SCREENSHOTS_ROOT is guaranteed to exist by ensureDataDirs (imported via db.ts).
+	// We only need to create the run-specific subdirectory here.
 	if (!fs.existsSync(runDir)) {
 		fs.mkdirSync(runDir, { recursive: true });
 	}
@@ -131,6 +124,8 @@ export async function captureIterationScreenshot(
 	const filePath = iterationScreenshotPath(runDir, iteration, tag);
 	const ok = await captureAnnotatedScreenshot(filePath);
 	if (!ok) {
-		console.warn(`[screenshotRun] Failed to capture ${tag} screenshot for iteration ${iteration}: ${filePath}`);
+		console.warn(
+			`[screenshotRun] Failed to capture ${tag} screenshot for iteration ${iteration}: ${filePath}`
+		);
 	}
 }

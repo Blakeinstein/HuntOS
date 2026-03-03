@@ -3,8 +3,17 @@
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import * as nodePath from 'path';
 import { browserExec } from './exec';
 import { coerceBoolean } from '$lib/utils/boolean';
+
+const SCREENSHOTS_AD_HOC_DIR = nodePath.join('data', 'logs', 'screenshots', 'ad-hoc');
+
+function defaultScreenshotPath(): string {
+	// ad-hoc dir is guaranteed to exist by ensureDataDirs (imported via db.ts).
+	const ts = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15); // "20250615-143022"
+	return nodePath.join(SCREENSHOTS_AD_HOC_DIR, `screenshot-${ts}.png`);
+}
 
 export const openUrl = createTool({
 	id: 'browser-open',
@@ -144,7 +153,7 @@ export const screenshot = createTool({
 	execute: async ({ path, fullPage }) => {
 		const args = ['screenshot'];
 		if (coerceBoolean(fullPage)) args.push('--full');
-		if (path) args.push(path);
+		args.push(path ?? defaultScreenshotPath());
 
 		const result = await browserExec(args, { timeout: 15_000 });
 		return {
