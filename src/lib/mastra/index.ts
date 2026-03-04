@@ -25,14 +25,7 @@ const profileAgent = createProfileAgent(
 	services.auditLogService,
 	services.documentService
 );
-const resumeAgent = createResumeAgent(
-	services.profileService,
-	services.auditLogService,
-	services.documentService,
-	services.resumeGenerationService,
-	services.resumeTemplateService,
-	services.resumeHistoryService
-);
+const resumeAgent = createResumeAgent();
 const jobBoardAgent = createJobBoardAgent();
 
 // Job board scraping sub-agents — each is registered with dot-notation keys

@@ -2,7 +2,9 @@ import { generateObject, generateText, wrapLanguageModel, extractReasoningMiddle
 import { env } from '$env/dynamic/private';
 import { resolveLanguageModel } from '$lib/mastra/providers';
 import { logLLMError } from '$lib/services/helpers/formatLLMError';
-import type { ProfileService, ProfileData } from './profile';
+import type { ProfileService } from './profile';
+import type { ResumeAgentService } from './resumeAgent';
+import { ResumeGenerationService } from './resumeGeneration';
 import { typstResumeDataSchema, type TypstResumeData } from '../resume/typstSchema';
 import untruncateJson from 'untruncate-json';
 import fs from 'fs';
@@ -59,14 +61,18 @@ function getDefaultConfig(): TypstResumeConfig {
  *
  * Pipeline:
  * 1. Load the user profile and serialise it to plain text.
- * 2. Call the LLM to produce structured JSON matching the NNJR YAML shape.
- * 3. Convert the JSON to YAML.
- * 4. Write the YAML to a temp file alongside the NNJR template files.
- * 5. Run `typst compile` to produce a PDF.
- * 6. Return the PDF buffer and structured data.
+ * 2. Delegate the LLM step to ResumeAgentService when available
+ *    (gives full Mastra Studio observability), otherwise call the
+ *    LLM directly as a fallback.
+ * 3. Convert the structured data to YAML.
+ * 4. Compile the YAML with `typst compile` to produce a PDF.
+ *
+ * The agent service can be wired after construction via `setAgentService()`
+ * to break the circular dependency between the service container and Mastra.
  */
 export class TypstResumeService {
 	private profileService: ProfileService;
+	private agentService: ResumeAgentService | null = null;
 	private config: TypstResumeConfig;
 	private promptTemplate: string | null = null;
 
@@ -75,45 +81,194 @@ export class TypstResumeService {
 		this.config = { ...getDefaultConfig(), ...config };
 	}
 
+	/** Wire the agent service after Mastra has initialised. */
+	setAgentService(agentService: ResumeAgentService): void {
+		this.agentService = agentService;
+	}
+
 	// ── Public API ────────────────────────────────────────────────
 
 	/**
 	 * Generate a tailored resume PDF using the NNJR Typst template.
 	 *
+	 * Uses the agent for the LLM step when available so every generation
+	 * is traced in Mastra Studio. Falls back to a direct LLM call when
+	 * the agent is not yet wired.
+	 *
 	 * @param jobDescription  Full text of the target job posting.
 	 */
 	async generate(jobDescription: string): Promise<TypstResumeResult> {
-		// 1. Load profile → plain text
 		const profile = await this.profileService.getProfile();
-		const resumeText = this.profileToText(profile);
+		const profileText = ResumeGenerationService.profileToText(profile);
 
-		// 2. Build the LLM prompt
-		const prompt = this.buildPrompt(resumeText, jobDescription);
+		// ── LLM step (agent-preferred, direct fallback) ───────────
+		let data: TypstResumeData;
 
-		// 3. Call the LLM for structured JSON
-		const data = await this.callLLM(prompt);
+		if (this.agentService?.isReady) {
+			const output = await this.agentService.generate({
+				profileText,
+				jobDescription,
+				format: 'typst'
+			});
+			data = output.format === 'typst' ? output.data : (output.data as unknown as TypstResumeData);
+		} else {
+			const prompt = this.buildPrompt(profileText, jobDescription);
+			data = await this.callLLM(prompt);
+		}
 
-		// 4. Convert to YAML
+		// ── Post-processing ───────────────────────────────────────
 		const yaml = this.toYaml(data);
-
-		// 5. Compile with Typst → PDF
 		const pdfBuffer = await this.compilePdf(yaml);
 
-		return {
-			pdfBuffer,
-			data,
-			yaml,
-			templateName: 'NNJR Typst'
-		};
+		return { pdfBuffer, data, yaml, templateName: 'NNJR Typst' };
 	}
 
-	// ── LLM ──────────────────────────────────────────────────────
+	// ── YAML serialisation ───────────────────────────────────────
 
 	/**
-	 * Calls the LLM to produce structured resume data matching the
-	 * NNJR YAML schema. Uses the same layered strategy as the
-	 * Markdown resume service: generateObject with repair, then
-	 * generateText fallback.
+	 * Convert the structured resume data to YAML matching the NNJR
+	 * `example.yml` format.
+	 */
+	toYaml(data: TypstResumeData): string {
+		const lines: string[] = [];
+
+		// Personal
+		lines.push('personal:');
+		lines.push(`  name: ${this.yamlString(data.personal.name)}`);
+		lines.push(`  phone: ${this.yamlString(data.personal.phone ?? '')}`);
+		lines.push(`  email: ${this.yamlString(data.personal.email)}`);
+		lines.push(`  linkedin: ${this.yamlString(data.personal.linkedin ?? '')}`);
+		lines.push(`  site: ${this.yamlString(data.personal.site ?? '')}`);
+		lines.push('');
+
+		// Education
+		lines.push('education:');
+		for (const edu of data.education) {
+			lines.push(`  - name: ${this.yamlString(edu.name)}`);
+			lines.push(`    degree: ${this.yamlString(edu.degree)}`);
+			lines.push(`    location: ${this.yamlString(edu.location ?? '')}`);
+			lines.push(`    date: ${this.yamlString(edu.date)}`);
+		}
+		lines.push('');
+
+		// Experience
+		lines.push('experience:');
+		for (const exp of data.experience) {
+			lines.push(`  - role: ${this.yamlString(exp.role)}`);
+			lines.push(`    name: ${this.yamlString(exp.name)}`);
+			lines.push(`    location: ${this.yamlString(exp.location ?? '')}`);
+			lines.push(`    date: ${this.yamlString(exp.date)}`);
+			lines.push(`    points:`);
+			for (const point of exp.points) {
+				lines.push(`      - ${this.yamlString(point)}`);
+			}
+		}
+		lines.push('');
+
+		// Projects (optional)
+		if (data.projects && data.projects.length > 0) {
+			lines.push('projects:');
+			for (const proj of data.projects) {
+				lines.push(`  - name: ${this.yamlString(proj.name)}`);
+				lines.push(`    skills: ${this.yamlString(proj.skills)}`);
+				lines.push(`    date: ${this.yamlString(proj.date)}`);
+				lines.push(`    points:`);
+				for (const point of proj.points) {
+					lines.push(`      - ${this.yamlString(point)}`);
+				}
+			}
+			lines.push('');
+		}
+
+		// Skills
+		lines.push('skills:');
+		for (const skill of data.skills) {
+			lines.push(`  - category: ${this.yamlString(skill.category)}`);
+			lines.push(`    skills: ${this.yamlString(skill.skills)}`);
+		}
+
+		return lines.join('\n');
+	}
+
+	private yamlString(value: string): string {
+		if (value === '') return '""';
+		const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+		return `"${escaped}"`;
+	}
+
+	// ── Typst compilation ────────────────────────────────────────
+
+	/**
+	 * Writes the YAML to a temp file inside the NNJR directory
+	 * and runs `typst compile` to produce a PDF.
+	 *
+	 * The temp files are cleaned up after compilation.
+	 */
+	async compilePdf(yaml: string): Promise<Buffer> {
+		const nnjrDir = this.config.nnjrDir;
+
+		const requiredFiles = ['resume_yaml.typ', 'yml.typ', 'template.typ'];
+		for (const file of requiredFiles) {
+			const filePath = path.join(nnjrDir, file);
+			if (!fs.existsSync(filePath)) {
+				throw new Error(
+					`NNJR template file missing: ${filePath}. ` +
+						'Ensure the vendor/NNJR submodule is initialised.'
+				);
+			}
+		}
+
+		const timestamp = Date.now();
+		const yamlFilename = `_generated_${timestamp}.yml`;
+		const yamlPath = path.join(nnjrDir, yamlFilename);
+
+		const typEntryFilename = `_generated_${timestamp}.typ`;
+		const typEntryPath = path.join(nnjrDir, typEntryFilename);
+		const typEntryContent = [
+			'#import "yml.typ": yml_resume',
+			'',
+			`#let resume_data = yaml("${yamlFilename}")`,
+			'#yml_resume(resume_data)'
+		].join('\n');
+
+		const pdfPath = path.join(nnjrDir, `_generated_${timestamp}.pdf`);
+
+		try {
+			fs.writeFileSync(yamlPath, yaml, 'utf8');
+			fs.writeFileSync(typEntryPath, typEntryContent, 'utf8');
+
+			const { stderr } = await execFileAsync(
+				'typst',
+				['compile', typEntryFilename, path.basename(pdfPath)],
+				{ cwd: nnjrDir, timeout: 30_000 }
+			);
+
+			if (stderr) {
+				console.warn('[TypstResume] typst compile stderr:', stderr);
+			}
+
+			if (!fs.existsSync(pdfPath)) {
+				throw new Error('typst compile did not produce a PDF file');
+			}
+
+			return fs.readFileSync(pdfPath);
+		} finally {
+			this.safeUnlink(yamlPath);
+			this.safeUnlink(typEntryPath);
+			this.safeUnlink(pdfPath);
+		}
+	}
+
+	// ── Direct LLM fallback ───────────────────────────────────────
+
+	/**
+	 * Calls the LLM directly to produce structured Typst resume data.
+	 * Used only when the agent service is not yet available.
+	 *
+	 * Strategy:
+	 * 1. generateObject with Zod schema (native structured output / json_schema).
+	 *    Uses experimental_repairText with untruncate-json for truncated output.
+	 * 2. generateText fallback — strips wrappers, repairs, validates manually.
 	 */
 	private async callLLM(prompt: string): Promise<TypstResumeData> {
 		const baseModel = resolveLanguageModel(this.config.model);
@@ -139,11 +294,6 @@ export class TypstResumeService {
 					'Resume data for the NNJR Typst template. Contains personal info, education, experience, projects, and categorised skills.',
 				prompt,
 				...sharedSettings,
-
-				// experimental_repairText must return a string (not null).
-				// If our repair helper cannot fix the text we return the
-				// stripped/raw text as-is so the SDK still gets a string and
-				// can throw a proper validation error rather than a null-ref.
 				experimental_repairText: async ({ text }) => {
 					console.warn(
 						'[TypstResume] repairText invoked — attempting repair…',
@@ -227,156 +377,7 @@ export class TypstResumeService {
 		return result.data;
 	}
 
-	// ── YAML serialisation ───────────────────────────────────────
-
-	/**
-	 * Convert the structured resume data to YAML matching the NNJR
-	 * `example.yml` format. Uses a hand-rolled serialiser to avoid
-	 * pulling in a YAML library — the structure is simple and flat.
-	 */
-	toYaml(data: TypstResumeData): string {
-		const lines: string[] = [];
-
-		// Personal
-		lines.push('personal:');
-		lines.push(`  name: ${this.yamlString(data.personal.name)}`);
-		lines.push(`  phone: ${this.yamlString(data.personal.phone ?? '')}`);
-		lines.push(`  email: ${this.yamlString(data.personal.email)}`);
-		lines.push(`  linkedin: ${this.yamlString(data.personal.linkedin ?? '')}`);
-		lines.push(`  site: ${this.yamlString(data.personal.site ?? '')}`);
-
-		// Education
-		lines.push('education:');
-		for (const edu of data.education) {
-			lines.push(`  - name: ${this.yamlString(edu.name)}`);
-			lines.push(`    degree: ${this.yamlString(edu.degree)}`);
-			lines.push(`    location: ${this.yamlString(edu.location ?? '')}`);
-			lines.push(`    date: ${this.yamlString(edu.date)}`);
-		}
-
-		// Experience
-		lines.push('experience:');
-		for (const exp of data.experience) {
-			lines.push(`  - role: ${this.yamlString(exp.role)}`);
-			lines.push(`    name: ${this.yamlString(exp.name)}`);
-			lines.push(`    location: ${this.yamlString(exp.location ?? '')}`);
-			lines.push(`    date: ${this.yamlString(exp.date)}`);
-			lines.push('    points:');
-			for (const point of exp.points) {
-				lines.push(`      - ${this.yamlString(point)}`);
-			}
-		}
-
-		// Projects - Always include this key, even if empty
-		lines.push('projects:');
-		if (data.projects && data.projects.length > 0) {
-			for (const proj of data.projects) {
-				lines.push(`  - name: ${this.yamlString(proj.name)}`);
-				lines.push(`    skills: ${this.yamlString(proj.skills)}`);
-				lines.push(`    date: ${this.yamlString(proj.date)}`);
-				lines.push('    points:');
-				for (const point of proj.points) {
-					lines.push(`      - ${this.yamlString(point)}`);
-				}
-			}
-		}
-
-		// Skills
-		lines.push('skills:');
-		for (const skill of data.skills) {
-			lines.push(`  - category: ${this.yamlString(skill.category)}`);
-			lines.push(`    skills: ${this.yamlString(skill.skills)}`);
-		}
-
-		return lines.join('\n') + '\n';
-	}
-
-	/**
-	 * Quote a string for safe YAML output. Wraps in double quotes
-	 * and escapes internal quotes and backslashes.
-	 */
-	private yamlString(value: string): string {
-		if (value === '') return '""';
-		// Always quote to avoid YAML parsing issues with colons, special chars, etc.
-		const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
-		return `"${escaped}"`;
-	}
-
-	// ── Typst compilation ────────────────────────────────────────
-
-	/**
-	 * Writes the YAML to a temp file inside the NNJR directory
-	 * and runs `typst compile resume_yaml.typ` to produce a PDF.
-	 *
-	 * The temp files are cleaned up after compilation.
-	 */
-	async compilePdf(yaml: string): Promise<Buffer> {
-		const nnjrDir = this.config.nnjrDir;
-
-		// Verify the NNJR template files exist
-		const requiredFiles = ['resume_yaml.typ', 'yml.typ', 'template.typ'];
-		for (const file of requiredFiles) {
-			const filePath = path.join(nnjrDir, file);
-			if (!fs.existsSync(filePath)) {
-				throw new Error(
-					`NNJR template file missing: ${filePath}. ` +
-						'Ensure the vendor/NNJR submodule is initialised.'
-				);
-			}
-		}
-
-		// Write YAML to a temp file in the NNJR directory
-		// (resume_yaml.typ imports `yaml("example.yml")` — we overwrite it temporarily)
-		const timestamp = Date.now();
-		const yamlFilename = `_generated_${timestamp}.yml`;
-		const yamlPath = path.join(nnjrDir, yamlFilename);
-
-		// Create a temp .typ file that imports our yaml instead of example.yml
-		const typEntryFilename = `_generated_${timestamp}.typ`;
-		const typEntryPath = path.join(nnjrDir, typEntryFilename);
-		const typEntryContent = [
-			'#import "yml.typ": yml_resume',
-			'',
-			`#let resume_data = yaml("${yamlFilename}")`,
-			'#yml_resume(resume_data)'
-		].join('\n');
-
-		const pdfPath = path.join(nnjrDir, `_generated_${timestamp}.pdf`);
-
-		try {
-			// Write the temp files
-			fs.writeFileSync(yamlPath, yaml, 'utf8');
-			fs.writeFileSync(typEntryPath, typEntryContent, 'utf8');
-
-			// Compile with Typst
-			const { stderr } = await execFileAsync(
-				'typst',
-				['compile', typEntryFilename, path.basename(pdfPath)],
-				{
-					cwd: nnjrDir,
-					timeout: 30_000
-				}
-			);
-
-			if (stderr) {
-				console.warn('[TypstResume] typst compile stderr:', stderr);
-			}
-
-			if (!fs.existsSync(pdfPath)) {
-				throw new Error('typst compile did not produce a PDF file');
-			}
-
-			const pdfBuffer = fs.readFileSync(pdfPath);
-			return pdfBuffer;
-		} finally {
-			// Clean up temp files
-			this.safeUnlink(yamlPath);
-			this.safeUnlink(typEntryPath);
-			this.safeUnlink(pdfPath);
-		}
-	}
-
-	// ── JSON repair helpers ──────────────────────────────────────
+	// ── JSON repair helpers ───────────────────────────────────────
 
 	private repairJson(raw: string): string | null {
 		const text = this.stripWrappers(raw);
@@ -450,24 +451,21 @@ export class TypstResumeService {
 
 	private stripWrappers(raw: string): string {
 		let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
 		const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
 		if (fenced) {
 			text = fenced[1].trim();
 		}
-
 		return text;
 	}
 
-	// ── Prompt ────────────────────────────────────────────────────
+	// ── Prompt (fallback path only) ───────────────────────────────
 
-	private buildPrompt(resumeText: string, jobDescription: string): string {
+	private buildPrompt(profileText: string, jobDescription: string): string {
 		if (!this.promptTemplate) {
 			this.promptTemplate = this.loadPromptTemplate();
 		}
-
 		return this.promptTemplate
-			.replace('{resumeText}', resumeText)
+			.replace('{resumeText}', profileText)
 			.replace('{jobDescription}', jobDescription);
 	}
 
@@ -485,68 +483,15 @@ export class TypstResumeService {
 			}
 		}
 
-		// Hard-coded fallback
 		return [
 			'You are a resume assistant. Given the following profile and job description,',
-			'produce structured JSON matching the NNJR Typst resume template format.',
+			'produce structured JSON matching the required resume schema.',
 			'',
 			'**Resume Text:** {resumeText}',
 			'**Job Description:** {jobDescription}',
 			'',
 			'Return only valid JSON matching the provided schema.'
 		].join('\n');
-	}
-
-	// ── Profile serialisation ─────────────────────────────────────
-
-	private profileToText(profile: ProfileData): string {
-		const lines: string[] = [];
-
-		const add = (label: string, key: string) => {
-			const value = profile[key];
-			if (!value) return;
-			const text = Array.isArray(value) ? value.join(', ') : value;
-			if (text.length > 0) {
-				lines.push(`${label}: ${text}`);
-			}
-		};
-
-		if (profile['profile_description']) {
-			const desc = Array.isArray(profile['profile_description'])
-				? profile['profile_description'].join('\n')
-				: profile['profile_description'];
-			lines.push(desc);
-			lines.push('');
-		}
-
-		add('Name', 'name');
-		add('Email', 'email');
-		add('Phone', 'phone');
-		add('Location', 'location');
-		add('LinkedIn', 'linkedin_url');
-		add('Portfolio', 'portfolio_url');
-		add('GitHub', 'github_url');
-		add('Summary', 'resume_summary');
-		add('Skills', 'skills');
-		add('Years of Experience', 'years_of_experience');
-		add('Experience', 'experience');
-		add('Projects', 'projects');
-		add('Education', 'education');
-		add('Certifications', 'certifications');
-		add('Languages', 'languages');
-
-		if (profile['resume_raw_text']) {
-			const raw = Array.isArray(profile['resume_raw_text'])
-				? profile['resume_raw_text'].join('\n')
-				: profile['resume_raw_text'];
-			if (raw.length > 0) {
-				lines.push('');
-				lines.push('--- Additional Resume Content ---');
-				lines.push(raw);
-			}
-		}
-
-		return lines.join('\n');
 	}
 
 	// ── Utilities ─────────────────────────────────────────────────

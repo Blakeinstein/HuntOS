@@ -1,5 +1,3 @@
-// src/lib/mastra/tools/resume/index.ts
-// Barrel export for all resume-related agent tools.
-
-export { createGenerateResumeTool } from './generate-resume';
-export { createListTemplatesTool } from './list-templates';
+// Resume tools have been removed.
+// The resume-agent is now a pure structured-output agent with no tools.
+// See src/lib/mastra/agents/resume-agent.ts

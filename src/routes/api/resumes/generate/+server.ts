@@ -1,9 +1,12 @@
-import { json } from '@sveltejs/kit';
-import { createServices } from '$lib/services';
-import { db } from '$lib/db';
-import type { ResumeData } from '$lib/services/resume/schema';
+// src/routes/api/resumes/generate/+server.ts
+// Resume generation API — delegates to the appropriate service based on the
+// configured resume format. Both services internally prefer the Mastra agent
+// for the LLM step (full Studio observability) and fall back to a direct LLM
+// call only when the agent is not yet wired.
 
-const services = createServices(db);
+import { json } from '@sveltejs/kit';
+import { services } from '$lib/mastra';
+import type { ResumeData } from '$lib/services/resume/schema';
 
 export async function POST({ request }) {
 	const finishAudit = services.auditLogService.start({
@@ -70,21 +73,18 @@ async function handleMarkdownGeneration(
 		templateId ? Number(templateId) : undefined
 	);
 
-	// Derive a name if none was provided
 	const name = resumeName || deriveResumeName(result.data?.name || 'Resume', jobDescription);
 
-	// Save to history (markdown file)
 	const historyEntry = services.resumeHistoryService.create({
 		name,
 		jobDescription,
 		templateId: templateId ? Number(templateId) : null,
 		templateName: result.templateName,
-		model: 'qwen/qwen3-30b-a3b-instruct-2507',
+		model: 'resume-agent',
 		data: result.data,
 		markdown: result.markdown
 	});
 
-	// Generate PDF alongside the markdown if requested
 	let pdfAvailable = false;
 	let pdfPath: string | null = null;
 
@@ -96,7 +96,6 @@ async function handleMarkdownGeneration(
 				pdfPath = pdfResult.entry.pdf_path;
 			}
 		} catch (pdfError) {
-			// PDF generation is non-critical — log and continue
 			console.warn(
 				'[api/resumes/generate] PDF generation failed (non-critical):',
 				pdfError instanceof Error ? pdfError.message : pdfError
@@ -107,9 +106,8 @@ async function handleMarkdownGeneration(
 	finishAudit({
 		status: 'success',
 		detail:
-			`Resume "${name}" generated successfully using "${result.templateName}" template (Markdown). ` +
-			`Skills: ${result.data.skills.length}, Experience: ${result.data.experience.length}, ` +
-			`Education: ${result.data.education.length}. Saved as history #${historyEntry.id}.` +
+			`Resume "${name}" generated using "${result.templateName}" template. ` +
+			`Saved as history #${historyEntry.id}.` +
 			(pdfAvailable ? ' PDF generated.' : ''),
 		meta: {
 			format: 'markdown',
@@ -117,22 +115,17 @@ async function handleMarkdownGeneration(
 			filePath: historyEntry.file_path,
 			pdfPath,
 			pdfAvailable,
-			resumeName: name,
-			templateName: result.templateName,
-			skillCount: result.data.skills.length,
-			experienceCount: result.data.experience.length,
-			educationCount: result.data.education.length,
-			certificationCount: result.data.certifications.length,
-			projectCount: result.data.projects.length,
-			jobDescriptionLength: jobDescription.length
+			templateName: result.templateName
 		}
 	});
 
 	return json({
-		...result,
+		markdown: result.markdown,
+		data: result.data as ResumeData,
+		templateName: result.templateName,
 		format: 'markdown',
 		historyId: historyEntry.id,
-		resumeName: name,
+		resumeName: historyEntry.name,
 		filePath: historyEntry.file_path,
 		pdfAvailable,
 		pdfPath
@@ -151,20 +144,16 @@ async function handleTypstGeneration(
 	const name =
 		resumeName || deriveResumeName(result.data.personal.name || 'Resume', jobDescription);
 
-	// Save the Typst output to history.
-	// We store the YAML as "markdown" content (it's the source format) and
-	// persist the PDF directly since Typst produces it natively.
 	const historyEntry = services.resumeHistoryService.create({
 		name,
 		jobDescription,
 		templateId: null,
 		templateName: result.templateName,
-		model: 'qwen/qwen3-30b-a3b-instruct-2507',
-		data: result.data as unknown as ResumeData, // TypstResumeData stored as JSON
-		markdown: result.yaml // Store YAML as the source content
+		model: 'resume-agent',
+		data: result.data as unknown as ResumeData,
+		markdown: result.yaml
 	});
 
-	// Write the Typst-generated PDF alongside the markdown/yaml file
 	let pdfAvailable = false;
 	let pdfPath: string | null = null;
 
@@ -189,9 +178,9 @@ async function handleTypstGeneration(
 	finishAudit({
 		status: 'success',
 		detail:
-			`Resume "${name}" generated successfully using "${result.templateName}" template (Typst). ` +
+			`Resume "${name}" generated using "${result.templateName}" template. ` +
 			`Skills: ${skillCount}, Experience: ${result.data.experience.length}, ` +
-			`Education: ${result.data.education.length}. Saved as history #${historyEntry.id}. PDF generated natively.`,
+			`Education: ${result.data.education.length}. Saved as history #${historyEntry.id}.`,
 		meta: {
 			format: 'typst',
 			historyId: historyEntry.id,
@@ -223,9 +212,6 @@ async function handleTypstGeneration(
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-/**
- * Derive a human-readable resume name from the candidate name and job description.
- */
 function deriveResumeName(candidateName: string, jobDescription: string): string {
 	const firstLine = jobDescription.trim().split('\n')[0].trim();
 	const snippet = firstLine.length > 60 ? firstLine.slice(0, 57) + '...' : firstLine;
@@ -234,7 +220,6 @@ function deriveResumeName(candidateName: string, jobDescription: string): string
 		return `${candidateName} - ${snippet}`;
 	}
 
-	const now = new Date();
-	const dateStr = now.toISOString().slice(0, 10);
+	const dateStr = new Date().toISOString().slice(0, 10);
 	return `${candidateName} - Resume ${dateStr}`;
 }

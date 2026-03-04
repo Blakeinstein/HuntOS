@@ -18,6 +18,7 @@ import { DocumentService } from '$lib/services/services/document';
 import { ApplicationResourceService } from '$lib/services/services/applicationResource';
 import { ApplicationPipelineService } from '$lib/services/services/applicationPipeline';
 import { ApplyPipelineExecutor } from '$lib/services/services/applyPipelineExecutor';
+import { ResumeAgentService } from '$lib/services/services/resumeAgent';
 import type { Mastra } from '@mastra/core';
 import type { SubAgentRegistry } from '$lib/mastra/agents/job-board-agent/registry';
 
@@ -28,6 +29,7 @@ export interface ServiceContainer {
 	resumeGenerationService: ResumeGenerationService;
 	resumeTemplateService: ResumeTemplateService;
 	resumeHistoryService: ResumeHistoryService;
+	resumeAgentService: ResumeAgentService;
 	pdfService: PdfService;
 	typstResumeService: TypstResumeService;
 	appSettingsService: AppSettingsService;
@@ -64,6 +66,7 @@ export function createServices(db: Database): ServiceContainer {
 	const resumeHistoryService = new ResumeHistoryService(db, undefined, pdfService);
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
+	const resumeAgentService = new ResumeAgentService();
 	const documentService = new DocumentService(db, auditLogService);
 	const applicationService = new ApplicationService(db);
 	const swimlaneService = new SwimlaneService(db);
@@ -92,6 +95,7 @@ export function createServices(db: Database): ServiceContainer {
 		resumeGenerationService,
 		resumeTemplateService,
 		resumeHistoryService,
+		resumeAgentService,
 		pdfService,
 		typstResumeService,
 		appSettingsService,
@@ -114,6 +118,9 @@ export function createServices(db: Database): ServiceContainer {
 				subAgentRegistry,
 				auditLogService
 			);
+			resumeAgentService.setMastra(mastra);
+			resumeGenerationService.setAgentService(resumeAgentService);
+			typstResumeService.setAgentService(resumeAgentService);
 			applyPipelineExecutor.setMastra(mastra);
 		}
 	};

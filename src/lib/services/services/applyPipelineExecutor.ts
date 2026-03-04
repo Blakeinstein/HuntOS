@@ -1071,7 +1071,7 @@ export class ApplyPipelineExecutor {
 
 			if (resumeFormat === 'typst') {
 				// ── Typst pipeline ───────────────────────────────────
-				this.log(runId, step, 'Generating tailored resume via LLM (Typst)…', 'progress', {
+				this.log(runId, step, 'Generating tailored resume (Typst)…', 'progress', {
 					descriptionLength: enrichedDescription.length
 				});
 
@@ -1087,20 +1087,18 @@ export class ApplyPipelineExecutor {
 					'progress'
 				);
 
-				// Save to resume history (YAML as "markdown" content, PDF persisted separately)
 				this.log(runId, step, 'Saving to resume history…', 'progress');
 				const historyEntry = this.resumeHistoryService.create({
 					name: resumeName,
 					jobDescription: research.jobDescription,
 					templateName: typstResult.templateName,
-					model: 'pipeline-auto',
+					model: 'resume-agent',
 					data: typstResult.data as unknown as ResumeData,
 					markdown: typstResult.yaml,
 					durationMs: generationDurationMs,
 					applicationId: application.id
 				});
 
-				// Persist the Typst-generated PDF alongside the history entry
 				try {
 					this.resumeHistoryService.persistTypstPdf(historyEntry.id, typstResult.pdfBuffer);
 					this.log(runId, step, 'Typst PDF persisted to history', 'progress');
@@ -1109,27 +1107,24 @@ export class ApplyPipelineExecutor {
 					this.log(runId, step, `Typst PDF persist warning: ${pdfMsg}`, 'warn');
 				}
 
-				// Convert to ResumeGenerationResult shape for downstream steps
 				result = {
 					markdown: typstResult.yaml,
 					data: typstResult.data as unknown as ResumeData,
 					templateName: typstResult.templateName
 				};
 			} else {
-				// ── Markdown + Handlebars pipeline ───────────────────
-				// Resolve the template: use the default (or user-configured) template
+				// ── Markdown pipeline ─────────────────────────────────
 				const template = this.resumeTemplateService.getDefault();
-				const templateId = template.id;
 
 				this.log(
 					runId,
 					step,
-					`Generating tailored resume via LLM (Markdown, template: ${template.name})…`,
+					`Generating tailored resume (Markdown, template: ${template.name})…`,
 					'progress',
 					{ descriptionLength: enrichedDescription.length }
 				);
 
-				result = await this.resumeGenerationService.generate(enrichedDescription, templateId);
+				result = await this.resumeGenerationService.generate(enrichedDescription, template.id);
 				const generationDurationMs = Date.now() - generationStartTime;
 
 				this.checkCancelled(runId);
@@ -1141,14 +1136,13 @@ export class ApplyPipelineExecutor {
 					'progress'
 				);
 
-				// Save to resume history
 				this.log(runId, step, 'Saving to resume history…', 'progress');
 				this.resumeHistoryService.create({
 					name: resumeName,
 					jobDescription: research.jobDescription,
-					templateId,
+					templateId: template.id,
 					templateName: result.templateName,
-					model: 'pipeline-auto',
+					model: 'resume-agent',
 					data: result.data,
 					markdown: result.markdown,
 					durationMs: generationDurationMs,

@@ -5,6 +5,7 @@ import { env } from '$env/dynamic/private';
 import { resolveLanguageModel } from '$lib/mastra/providers';
 import type { ProfileService, ProfileData } from './profile';
 import type { ResumeTemplateService, ResumeTemplate } from './resumeTemplate';
+import type { ResumeAgentService } from './resumeAgent';
 import { resumeDataSchema, type ResumeData } from '../resume/schema';
 import untruncateJson from 'untruncate-json';
 import fs from 'fs';
@@ -26,7 +27,7 @@ export interface ResumeGenerationConfig {
 }
 
 export interface ResumeGenerationResult {
-	/** The final resume rendered as Markdown through the Handlebars template */
+	/** The final resume rendered as Markdown through the template */
 	markdown: string;
 	/** The structured JSON data returned by the LLM (before templating) */
 	data: ResumeData;
@@ -48,18 +49,21 @@ function getDefaultConfig(): ResumeGenerationConfig {
 // ── Service ──────────────────────────────────────────────────────
 
 /**
- * Orchestrates resume generation end-to-end:
+ * Orchestrates Markdown resume generation end-to-end:
  *
  * 1. Loads the user profile and serialises it to plain text.
- * 2. Reads the LLM prompt template from disk and fills in placeholders.
- * 3. Calls the LLM via AI SDK `generateObject` to produce structured JSON.
- * 4. Renders the JSON through a Handlebars resume template into Markdown.
+ * 2. Delegates the LLM step to ResumeAgentService when available
+ *    (gives full Mastra Studio observability), otherwise calls the
+ *    LLM directly as a fallback.
+ * 3. Renders the structured JSON through a Handlebars template into Markdown.
  *
- * Adapted from https://github.com/Blakeinstein/resume-ai (MIT).
+ * The agent service can be wired after construction via `setAgentService()`
+ * to break the circular dependency between the service container and Mastra.
  */
 export class ResumeGenerationService {
 	private profileService: ProfileService;
 	private templateService: ResumeTemplateService;
+	private agentService: ResumeAgentService | null = null;
 	private config: ResumeGenerationConfig;
 	private promptTemplate: string | null = null;
 
@@ -73,65 +77,157 @@ export class ResumeGenerationService {
 		this.config = { ...getDefaultConfig(), ...config };
 	}
 
+	/** Wire the agent service after Mastra has initialised. */
+	setAgentService(agentService: ResumeAgentService): void {
+		this.agentService = agentService;
+	}
+
 	// ── Public API ────────────────────────────────────────────────
 
 	/**
-	 * Generate a tailored resume for a given job description.
+	 * Generate a tailored Markdown resume for a given job description.
+	 *
+	 * Uses the agent for the LLM step when available so every generation
+	 * is traced in Mastra Studio.  Falls back to a direct LLM call when
+	 * the agent is not yet wired.
 	 *
 	 * @param jobDescription  The full text of the target job posting.
 	 * @param templateId      Optional template id. Falls back to the default.
 	 */
 	async generate(jobDescription: string, templateId?: number): Promise<ResumeGenerationResult> {
-		// 1. Load profile → plain text
 		const profile = await this.profileService.getProfile();
-		const resumeText = this.profileToText(profile);
+		const profileText = ResumeGenerationService.profileToText(profile);
 
-		// 2. Build the LLM prompt
-		const prompt = this.buildPrompt(resumeText, jobDescription);
+		// ── LLM step (agent-preferred, direct fallback) ───────────
+		let data: ResumeData;
 
-		// 3. Call the LLM for structured JSON
-		const data = await this.callLLM(prompt);
+		if (this.agentService?.isReady) {
+			const output = await this.agentService.generate({
+				profileText,
+				jobDescription,
+				format: 'markdown'
+			});
+			// TypeScript narrows the discriminated union
+			data = output.format === 'markdown' ? output.data : (output.data as unknown as ResumeData);
+		} else {
+			const prompt = this.buildPrompt(profileText, jobDescription);
+			data = await this.callLLM(prompt);
+		}
 
-		// 4. Resolve the Handlebars template
+		// ── Template rendering ────────────────────────────────────
 		const template = templateId
 			? (this.templateService.getById(templateId) ?? this.templateService.getDefault())
 			: this.templateService.getDefault();
 
-		// 5. Render Markdown
 		const markdown = this.applyTemplate(template, data);
 
-		return {
-			markdown,
-			data,
-			templateName: template.name
-		};
+		return { markdown, data, templateName: template.name };
 	}
 
-	// ── LLM ──────────────────────────────────────────────────────
+	// ── Prompt helpers (also used by TypstResumeService) ─────────
+
+	buildPrompt(profileText: string, jobDescription: string): string {
+		if (!this.promptTemplate) {
+			this.promptTemplate = this.loadPromptTemplate();
+		}
+		return this.promptTemplate
+			.replace('{resumeText}', profileText)
+			.replace('{jobDescription}', jobDescription);
+	}
+
+	private loadPromptTemplate(): string {
+		const candidates = [
+			path.resolve(process.cwd(), 'src/lib/services/resume/defaultPrompt.txt'),
+			path.resolve(__dirname, '../resume/defaultPrompt.txt')
+		];
+
+		for (const p of candidates) {
+			try {
+				return fs.readFileSync(p, 'utf8');
+			} catch {
+				// try next
+			}
+		}
+
+		return [
+			'You are a resume assistant. Given the following profile and job description,',
+			'produce a structured JSON resume that highlights the most relevant experience.',
+			'',
+			'**Resume Text:** {resumeText}',
+			'**Job Description:** {jobDescription}',
+			'',
+			'Return only valid JSON matching the provided schema.'
+		].join('\n');
+	}
 
 	/**
-	 * Calls the LLM to produce structured resume JSON.
+	 * Serialise a profile record to a plain-text block suitable for an LLM prompt.
+	 * Exposed as a static so TypstResumeService can reuse it without duplication.
+	 */
+	static profileToText(profile: ProfileData): string {
+		const lines: string[] = [];
+
+		const add = (label: string, key: string) => {
+			const value = profile[key];
+			if (!value) return;
+			const text = Array.isArray(value) ? value.join(', ') : value;
+			if (text.length > 0) {
+				lines.push(`${label}: ${text}`);
+			}
+		};
+
+		if (profile['profile_description']) {
+			const desc = Array.isArray(profile['profile_description'])
+				? profile['profile_description'].join('\n')
+				: profile['profile_description'];
+			lines.push(desc);
+			lines.push('');
+		}
+
+		add('Name', 'name');
+		add('Email', 'email');
+		add('Phone', 'phone');
+		add('Location', 'location');
+		add('LinkedIn', 'linkedin_url');
+		add('Portfolio', 'portfolio_url');
+		add('GitHub', 'github_url');
+		add('Summary', 'resume_summary');
+		add('Skills', 'skills');
+		add('Years of Experience', 'years_of_experience');
+		add('Experience', 'experience');
+		add('Projects', 'projects');
+		add('Education', 'education');
+		add('Certifications', 'certifications');
+		add('Languages', 'languages');
+
+		if (profile['resume_raw_text']) {
+			const raw = Array.isArray(profile['resume_raw_text'])
+				? profile['resume_raw_text'].join('\n')
+				: profile['resume_raw_text'];
+			if (raw.length > 0) {
+				lines.push('');
+				lines.push('--- Additional Resume Content ---');
+				lines.push(raw);
+			}
+		}
+
+		return lines.join('\n');
+	}
+
+	// ── Direct LLM fallback ───────────────────────────────────────
+
+	/**
+	 * Calls the LLM directly to produce structured resume JSON.
+	 * Used only when the agent service is not yet available.
 	 *
-	 * Strategy (layered, most robust → most lenient):
-	 *
-	 * 1. **`generateObject`** with the Zod schema (structured output / `json_schema`
-	 *    response format). The provider sends the schema natively so the model is
-	 *    constrained. Uses `experimental_repairText` with `untruncate-json` so
-	 *    that output truncated by token limits is automatically completed before
-	 *    validation.
-	 *
-	 * 2. **`generateText` fallback** — strips `<think>` tags and code fences,
-	 *    applies `untruncate-json`, and validates with Zod manually.
-	 *
-	 * Both paths set an explicit `maxOutputTokens` (default 16 384) to avoid
-	 * silent truncation by the provider's default completion limit.
+	 * Strategy:
+	 * 1. generateObject with Zod schema (native structured output / json_schema).
+	 *    Uses experimental_repairText with untruncate-json for truncated output.
+	 * 2. generateText fallback — strips wrappers, repairs, validates manually.
 	 */
 	private async callLLM(prompt: string): Promise<ResumeData> {
 		const baseModel = resolveLanguageModel(this.config.model);
 
-		// Wrap with reasoning-extraction middleware so `<think>` blocks from
-		// thinking models (Qwen3, DeepSeek R1, etc.) are stripped before the
-		// output parser sees the text.
 		const model = wrapLanguageModel({
 			model: baseModel,
 			middleware: [extractReasoningMiddleware({ tagName: 'think' })]
@@ -142,7 +238,7 @@ export class ResumeGenerationService {
 			abortSignal: AbortSignal.timeout(this.config.timeoutMs)
 		};
 
-		// ── Primary: generateObject (native structured output) ────
+		// ── Primary: generateObject ───────────────────────────────
 		let primaryError: unknown;
 		try {
 			const result = await generateObject({
@@ -153,17 +249,9 @@ export class ResumeGenerationService {
 					'ATS-friendly resume with professional profile, skills, experience, education, certifications, projects, and additional info.',
 				prompt,
 				...sharedSettings,
-
-				// Repair truncated / malformed JSON before validation.
-				// Called automatically when the raw text fails to parse or
-				// doesn't match the schema.
-				// experimental_repairText must return a string (not null).
-				// If our repair helper cannot fix the text we return the
-				// stripped/raw text as-is so the SDK still gets a string and
-				// can throw a proper validation error rather than a null-ref.
 				experimental_repairText: async ({ text }) => {
 					console.warn(
-						'[ResumeGeneration] repairText invoked. finishReason may be "length" (truncation). Attempting repair…',
+						'[ResumeGeneration] repairText invoked. Attempting repair…',
 						'text length:',
 						text.length
 					);
@@ -173,7 +261,7 @@ export class ResumeGenerationService {
 
 			if (result.finishReason === 'length') {
 				console.warn(
-					'[ResumeGeneration] generateObject finished with reason "length" — output may have been truncated.',
+					'[ResumeGeneration] generateObject finished with reason "length" — output may be truncated.',
 					'Tokens used:',
 					result.usage
 				);
@@ -204,7 +292,6 @@ export class ResumeGenerationService {
 			);
 		}
 
-		// Try to extract and repair JSON from the raw text
 		const json = this.extractAndRepairJson(text);
 		if (!json) {
 			const { summary: primarySummary } = logLLMError(
@@ -248,20 +335,11 @@ export class ResumeGenerationService {
 		return result.data;
 	}
 
-	// ── JSON repair helpers ──────────────────────────────────────
+	// ── JSON repair helpers ───────────────────────────────────────
 
-	/**
-	 * Attempt to repair a raw text string that should be JSON.
-	 * Used by `experimental_repairText` in `generateObject`.
-	 *
-	 * 1. Strips `<think>` blocks, code fences, and surrounding prose.
-	 * 2. Applies `untruncate-json` to close any truncated structures.
-	 * 3. Returns the repaired string, or `null` if unrecoverable.
-	 */
 	private repairJson(raw: string): string | null {
 		const text = this.stripWrappers(raw);
 
-		// Try parsing as-is first
 		try {
 			JSON.parse(text);
 			return text;
@@ -269,10 +347,9 @@ export class ResumeGenerationService {
 			// needs repair
 		}
 
-		// Apply untruncate-json to close truncated JSON structures
 		try {
 			const repaired = untruncateJson(text);
-			JSON.parse(repaired); // verify it's now valid
+			JSON.parse(repaired);
 			console.info(
 				'[ResumeGeneration] untruncate-json successfully repaired truncated output.',
 				`Original length: ${text.length}, repaired length: ${repaired.length}`
@@ -282,7 +359,6 @@ export class ResumeGenerationService {
 			// untruncate couldn't fix it
 		}
 
-		// Try extracting just the { … } portion and repairing that
 		const braceMatch = text.match(/\{[\s\S]*/);
 		if (braceMatch) {
 			try {
@@ -298,21 +374,15 @@ export class ResumeGenerationService {
 		return null;
 	}
 
-	/**
-	 * Full extraction + repair pipeline for the fallback path.
-	 * Returns parsed JSON or `null`.
-	 */
 	private extractAndRepairJson(raw: string): unknown | null {
 		const text = this.stripWrappers(raw);
 
-		// 1. Try parsing directly
 		try {
 			return JSON.parse(text);
 		} catch {
 			// needs work
 		}
 
-		// 2. Try untruncate-json on the full text
 		try {
 			const repaired = untruncateJson(text);
 			return JSON.parse(repaired);
@@ -320,7 +390,6 @@ export class ResumeGenerationService {
 			// continue
 		}
 
-		// 3. Extract the first { … } block (greedy) and try
 		const braceMatch = text.match(/\{[\s\S]*\}/);
 		if (braceMatch) {
 			try {
@@ -330,7 +399,6 @@ export class ResumeGenerationService {
 			}
 		}
 
-		// 4. Extract from first { to end (for truncated output) and repair
 		const braceStart = text.match(/\{[\s\S]*/);
 		if (braceStart) {
 			try {
@@ -344,98 +412,31 @@ export class ResumeGenerationService {
 		return null;
 	}
 
-	/**
-	 * Strip common LLM output wrappers:
-	 * - `<think>…</think>` blocks from thinking models
-	 * - Markdown fenced code blocks (```json … ```)
-	 * - Leading/trailing whitespace
-	 */
 	private stripWrappers(raw: string): string {
-		// Remove <think>…</think> blocks
 		let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-		// Extract content from fenced code blocks
 		const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
 		if (fenced) {
 			text = fenced[1].trim();
 		}
-
 		return text;
-	}
-
-	// ── Prompt ────────────────────────────────────────────────────
-
-	/**
-	 * Reads the prompt template from disk (once, then cached) and
-	 * replaces `{resumeText}` / `{jobDescription}` placeholders.
-	 */
-	private buildPrompt(resumeText: string, jobDescription: string): string {
-		if (!this.promptTemplate) {
-			this.promptTemplate = this.loadPromptTemplate();
-		}
-
-		return this.promptTemplate
-			.replace('{resumeText}', resumeText)
-			.replace('{jobDescription}', jobDescription);
-	}
-
-	private loadPromptTemplate(): string {
-		const candidates = [
-			path.resolve(process.cwd(), 'src/lib/services/resume/defaultPrompt.txt'),
-			path.resolve(__dirname, '../resume/defaultPrompt.txt')
-		];
-
-		for (const p of candidates) {
-			try {
-				return fs.readFileSync(p, 'utf8');
-			} catch {
-				// try next
-			}
-		}
-
-		// Hard-coded fallback so the service never crashes on missing file.
-		return [
-			'You are a resume assistant. Given the following profile and job description,',
-			'produce a structured JSON resume that highlights the most relevant experience.',
-			'',
-			'**Resume Text:** {resumeText}',
-			'**Job Description:** {jobDescription}',
-			'',
-			'Return only valid JSON matching the provided schema.'
-		].join('\n');
 	}
 
 	// ── Templating ────────────────────────────────────────────────
 
-	/**
-	 * Compiles the Handlebars template and renders the resume data
-	 * into a Markdown string.
-	 *
-	 * Registers custom Handlebars helpers:
-	 * - `hasKeys`: block helper that renders its content only when an object has ≥1 key
-	 * - `join`: inline helper that joins an array with a separator (default ", ")
-	 */
 	private applyTemplate(template: ResumeTemplate, data: ResumeData): string {
 		const hbs = Handlebars.create();
 
-		// Works as a subexpression: {{#if (hasKeys obj)}} → returns boolean
-		// Works as a block helper:  {{#hasKeys obj}}…{{/hasKeys}} → renders content
 		hbs.registerHelper(
 			'hasKeys',
 			function (this: unknown, obj: unknown, options: Handlebars.HelperOptions) {
 				const result = obj && typeof obj === 'object' && Object.keys(obj).length > 0;
-
-				// Subexpression usage — no fn/inverse, just return a boolean for {{#if}}
 				if (typeof options.fn !== 'function') {
 					return !!result;
 				}
-
-				// Block helper usage
 				return result ? options.fn(this) : options.inverse(this);
 			}
 		);
 
-		// {{join array ", "}} — joins array elements with separator
 		hbs.registerHelper('join', function (_arr: unknown, sep: unknown) {
 			const arr = Array.isArray(_arr) ? _arr : [];
 			const separator = typeof sep === 'string' ? sep : ', ';
@@ -444,63 +445,5 @@ export class ResumeGenerationService {
 
 		const compiled = hbs.compile(template.content);
 		return compiled(data);
-	}
-
-	// ── Profile serialisation ─────────────────────────────────────
-
-	/**
-	 * Converts the structured profile into a human-readable plain-text
-	 * block suitable for the LLM prompt.
-	 */
-	private profileToText(profile: ProfileData): string {
-		const lines: string[] = [];
-
-		const add = (label: string, key: string) => {
-			const value = profile[key];
-			if (!value) return;
-			const text = Array.isArray(value) ? value.join(', ') : value;
-			if (text.length > 0) {
-				lines.push(`${label}: ${text}`);
-			}
-		};
-
-		// Prefer the comprehensive description if available.
-		if (profile['profile_description']) {
-			const desc = Array.isArray(profile['profile_description'])
-				? profile['profile_description'].join('\n')
-				: profile['profile_description'];
-			lines.push(desc);
-			lines.push('');
-		}
-
-		add('Name', 'name');
-		add('Email', 'email');
-		add('Phone', 'phone');
-		add('Location', 'location');
-		add('LinkedIn', 'linkedin_url');
-		add('Portfolio', 'portfolio_url');
-		add('GitHub', 'github_url');
-		add('Summary', 'resume_summary');
-		add('Skills', 'skills');
-		add('Years of Experience', 'years_of_experience');
-		add('Experience', 'experience');
-		add('Projects', 'projects');
-		add('Education', 'education');
-		add('Certifications', 'certifications');
-		add('Languages', 'languages');
-
-		// Include raw resume text when available (may contain extra detail).
-		if (profile['resume_raw_text']) {
-			const raw = Array.isArray(profile['resume_raw_text'])
-				? profile['resume_raw_text'].join('\n')
-				: profile['resume_raw_text'];
-			if (raw.length > 0) {
-				lines.push('');
-				lines.push('--- Additional Resume Content ---');
-				lines.push(raw);
-			}
-		}
-
-		return lines.join('\n');
 	}
 }
