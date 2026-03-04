@@ -9,8 +9,8 @@
 // (template rendering, YAML serialisation, PDF compilation, history saving)
 // is handled by the calling service — this class owns only the LLM step.
 
-import { RequestContext } from '@mastra/core/request-context';
 import type { Mastra } from '@mastra/core';
+import { RequestContext } from '@mastra/core/request-context';
 import { resumeDataSchema, type ResumeData } from '$lib/services/resume/schema';
 import { typstResumeDataSchema, type TypstResumeData } from '$lib/services/resume/typstSchema';
 import { promptRegistry } from '$lib/mastra/prompts/load';
@@ -83,16 +83,16 @@ export class ResumeAgentService {
 
 		// Inject format instructions via RequestContext so the agent's
 		// dynamicContext function can read them from requestContext.get(…).
-		const agentResult = await RequestContext.run(
-			{ 'format-instructions': formatInstructions },
-			() =>
-				agent.generate(prompt, {
-					output: format === 'markdown' ? resumeDataSchema : typstResumeDataSchema
-				})
-		);
+		const requestContext = new RequestContext([['format-instructions', formatInstructions]]);
 
-		// agent.generate with output schema returns agentResult.object
-		const raw = (agentResult as { object?: unknown }).object;
+		const agentResult = await agent.generate(prompt, {
+			structuredOutput: {
+				schema: format === 'markdown' ? resumeDataSchema : typstResumeDataSchema
+			},
+			requestContext
+		});
+
+		const raw = agentResult.object;
 
 		if (format === 'markdown') {
 			const parsed = resumeDataSchema.safeParse(raw);
