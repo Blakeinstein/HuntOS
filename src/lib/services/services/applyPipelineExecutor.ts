@@ -1320,10 +1320,12 @@ export class ApplyPipelineExecutor {
 				title: `Application agent started: ${site} → ${application.company}`,
 				meta: {
 					applicationId: application.id,
+					pipelineRunId: runId,
 					url,
 					site,
 					agentId: 'job-application-agent',
-					hasResumePdf: !!resumeFilePath
+					hasResumePdf: !!resumeFilePath,
+					screenshotDir: screenshotRunDir
 				}
 			});
 
@@ -1470,7 +1472,8 @@ export class ApplyPipelineExecutor {
 					blocked: appResult.blocked,
 					fieldsFilled: appResult.fields_filled,
 					fieldsMissing: appResult.fields_missing,
-					errors: appResult.errors
+					errors: appResult.errors,
+					screenshotDir: screenshotRunDir
 				}
 			});
 

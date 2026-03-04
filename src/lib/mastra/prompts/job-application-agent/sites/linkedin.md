@@ -47,11 +47,51 @@ Some LinkedIn postings link to the company's own career page or ATS. When you cl
 
 After navigating and taking a snapshot, check for these LinkedIn-specific conditions:
 
-- **Login wall:** If **the snapshot shows** a sign-in form, a "Sign in to apply" prompt, or the URL has redirected to `linkedin.com/login`, STOP. Return `blocked: true` with `blocked_reason: "LinkedIn login required"`. Do NOT attempt to log in.
+- **Login wall:** If **the snapshot shows** a sign-in form, a "Sign in to apply" prompt, or the URL has redirected to `linkedin.com/login`, STOP. Return `blocked: true` with `blocked_reason: "LinkedIn login required"`. The browser session must already be authenticated with LinkedIn for Easy Apply to work — do NOT attempt to enter credentials.
 - **"Application no longer available":** If the posting shows "No longer accepting applications", "This job is no longer available", "Position filled", or similar, STOP. Return `success: false`, `end_reason: "closed"`, and `end_reason_description` explaining the specific reason (e.g., "The job posting is no longer accepting applications").
 - **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser-find-text { text: "Accept", action: "click" }` or `browser-find-role { role: "button", name: "Reject non-essential", action: "click" }`. Re-take `browser-snapshot`.
 - **"Already applied" indicator:** If LinkedIn shows "Applied" or "You've already applied", STOP. Return `success: false`, `end_reason: "already_applied"`, and `end_reason_description` explaining that you've already applied.
 - **Job not found / 404 error:** If the page shows "Page not found", "The job posting no longer exists", or similar, STOP. Return `success: false`, `end_reason: "closed"`, with explanation.
+
+### LinkedIn as an SSO Provider on External Sites
+
+When the **Detected Site is NOT LinkedIn** but the application page shows a LinkedIn SSO button (e.g. "Apply with LinkedIn", "Sign in with LinkedIn", "Continue with LinkedIn"), this is a separate scenario from the LinkedIn Easy Apply flow above. In this case you are using LinkedIn as an identity provider to authenticate with a third-party ATS (Greenhouse, Lever, Workday, SmartRecruiters, etc.).
+
+Follow this flow:
+
+1. **Click the LinkedIn SSO button.** Use one of these in order:
+   - `browser-find-text { text: "Apply with LinkedIn", action: "click" }`
+   - `browser-find-text { text: "Sign in with LinkedIn", action: "click" }`
+   - `browser-find-text { text: "Continue with LinkedIn", action: "click" }`
+   - `browser-find-text { text: "LinkedIn", action: "click" }` (branded button fallback)
+
+2. **Check for a new tab or popup.** Call `browser-wait-time { ms: 1500 }` then `browser-tab-list`. If a new tab has opened on `linkedin.com`, call `browser-tab-switch { index: N }` to focus it.
+
+3. **Handle the LinkedIn OAuth page.** Call `browser-wait-load { state: "networkidle" }`, `browser-get-url`, and `browser-snapshot`.
+
+   - **Already authenticated → immediate redirect:** `browser-get-url` shows the ATS domain (not LinkedIn). ✅ Proceed to step 5.
+   - **LinkedIn authorization/consent screen** ("Allow [App] to access your LinkedIn account?"):
+     - Call `browser-find-text { text: "Allow", action: "click" }` or `browser-find-role { role: "button", name: "Allow", action: "click" }`.
+     - Call `browser-wait-load { state: "networkidle" }`. ✅ Proceed to step 4.
+   - **LinkedIn login form (email + password):**
+     - STOP. Return `blocked: true` with `blocked_reason: "LinkedIn SSO requires LinkedIn login — browser session not authenticated with LinkedIn"`.
+     - Do NOT enter any credentials.
+
+4. **If a popup was used:** After consent, the popup typically closes. Call `browser-tab-list` and `browser-tab-switch` back to the original application tab (usually index 0).
+
+5. **Confirm the application page is now accessible:**
+   - `browser-wait-load { state: "networkidle" }`
+   - `browser-get-url` — confirm you are on the ATS domain.
+   - `browser-snapshot` — verify the application form is now visible.
+   - If still on a login page, STOP with `blocked: true` and `blocked_reason: "LinkedIn SSO failed — still on login page after OAuth flow"`.
+
+6. **Continue with the application form** from Step 3 of the main instructions. Record in `notes`: `"Used LinkedIn SSO to authenticate with [ATS name] — succeeded"`.
+
+**LinkedIn OAuth DOM Reference (for the consent screen):**
+- Authorization page URL pattern: `linkedin.com/oauth/v2/authorization`, `linkedin.com/uas/oauth2/authorization`
+- "Allow" button: `button[name="authorize"]`, `input[value="Allow"]`, or button with text "Allow"
+- "Cancel" / "Deny" button: avoid these — only click "Allow"
+- App name displayed on consent page: `.oauth-application-name`, `h1`, or similar heading
 
 ### Locating and Clicking the Apply Button
 

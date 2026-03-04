@@ -168,7 +168,12 @@ You have access to the `agent-browser` toolset for interacting with web pages vi
 
 Check for these conditions and handle them:
 
-- **Login/authentication wall:** If **the snapshot shows** a sign-in form, login prompt, or the URL has redirected to an OAuth/login page, STOP. Return `blocked: true` with `blocked_reason: "Login required"`. Do NOT attempt to create accounts or log in.
+- **Login/authentication wall:** If **the snapshot shows** a sign-in form, login prompt, or the URL has redirected to an OAuth/login page, **do NOT immediately block**. Instead, follow the **SSO / Social Login Handling** steps below before giving up:
+  1. Inspect the login page for SSO buttons (LinkedIn, Google, Microsoft, GitHub, Apple).
+  2. If an SSO button is found, attempt to use it as described in the **SSO / Social Login Handling** section.
+  3. If SSO succeeds and you are redirected back to the application, continue from Step 3.
+  4. Only return `blocked: true` if: (a) no SSO option exists, (b) the SSO provider itself requires credentials (login form shown), or (c) two SSO attempts have failed.
+  Do NOT attempt to create accounts or enter email/password credentials under any circumstances.
 - **CAPTCHA:** If a CAPTCHA challenge is detected (reCAPTCHA, hCaptcha, Cloudflare challenge, etc.), STOP immediately. Return `blocked: true` with `blocked_reason: "CAPTCHA detected"`.
 - **Cookie consent / pop-ups:** Dismiss any cookie banners, notification pop-ups, or modal overlays. Use `browser-find-text` with `text: "Accept"` and `action: "click"`, or `browser-find-role` with `role: "button"` and `name: "Close"`. Then re-take a `browser-snapshot`.
 - **Redirect to external site:** If the page redirects to a different domain for the application, follow the redirect and continue. Use `browser-get-url` to confirm the current location.
@@ -176,6 +181,76 @@ Check for these conditions and handle them:
 - **"Already applied" indicator:** If the page shows that you have already applied, STOP. Return `success: false` with `errors: ["Already applied to this position"]`.
 
 **After handling page state, consult the Site-Specific Instructions in your Runtime Context.** The site-specific instructions contain detailed guidance for the detected platform (DOM selectors, modal flows, iframe handling, known quirks). Follow them closely.
+
+---
+
+### Step 2a: SSO / Social Login Handling
+
+> **Only enter this step if Step 2 detected a login wall.** If the page loaded directly into an application form or job posting, skip ahead to Step 3.
+
+Many job boards and ATS platforms (Greenhouse, Lever, Workday, SmartRecruiters, and others) offer SSO login options that the browser session may already satisfy — especially LinkedIn OAuth. Follow these steps precisely.
+
+#### SSO-1: Detect Available SSO Options
+
+Call `browser-snapshot { interactive: true }` on the login wall and scan for SSO buttons. Priority order:
+
+| Button Text / Pattern | Provider | Priority |
+|----------------------|----------|----------|
+| "Sign in with LinkedIn", "Continue with LinkedIn", "Apply with LinkedIn" | LinkedIn | **Highest** |
+| "Sign in with Google", "Continue with Google" | Google | High |
+| "Sign in with Microsoft", "Continue with Microsoft" | Microsoft | Medium |
+| "Sign in with GitHub" | GitHub | Low |
+| "Sign in with Apple" | Apple | Low |
+
+Detection sequence (try in order until one succeeds):
+1. `browser-find-text { text: "Sign in with LinkedIn", action: "click" }`
+2. `browser-find-text { text: "Continue with LinkedIn", action: "click" }`
+3. `browser-find-text { text: "Apply with LinkedIn", action: "click" }`
+4. `browser-find-text { text: "LinkedIn", action: "click" }` (partial/branded button)
+5. `browser-find-role { role: "button", name: "LinkedIn", action: "click" }`
+
+If LinkedIn is not found, try Google using the same pattern, then Microsoft, then others.
+
+**If no SSO option exists at all**, STOP. Return `blocked: true` with `blocked_reason: "Login required — no SSO option available"`.
+
+#### SSO-2: Handle the Provider OAuth Flow
+
+After clicking an SSO button, call `browser-wait-load { state: "networkidle" }`, then `browser-wait-time { ms: 1000 }`, and then `browser-get-url` and `browser-snapshot`.
+
+**Check if a new tab opened instead of a redirect:**
+- Call `browser-tab-list`. If a new tab with the provider domain is present, `browser-tab-switch { index: N }` to it first.
+
+**LinkedIn OAuth (`linkedin.com/oauth` or `linkedin.com/uas/login`):**
+- **Already authenticated → immediate redirect back:** `browser-get-url` shows the application site domain. ✅ Continue to SSO-3.
+- **Consent/authorization screen ("Allow [App] to access your LinkedIn account?"):** Call `browser-find-text { text: "Allow", action: "click" }`. Wait for redirect. ✅ Continue to SSO-3.
+- **LinkedIn login form (email + password fields visible):** STOP. Return `blocked: true` with `blocked_reason: "LinkedIn SSO requires LinkedIn login — browser session not authenticated with LinkedIn"`.
+
+**Google OAuth (`accounts.google.com`):**
+- **Account chooser (already signed in):** Find the user's email from User Profile in the list. Call `browser-find-text { text: "<email>", action: "click" }`. If not listed, click the first account. Wait for redirect. ✅ Continue to SSO-3.
+- **Consent screen:** Call `browser-find-text { text: "Allow", action: "click" }`. Wait for redirect. ✅ Continue to SSO-3.
+- **Google login form:** STOP. Return `blocked: true` with `blocked_reason: "Google SSO requires Google login — browser session not authenticated"`.
+
+**Microsoft OAuth (`login.microsoftonline.com` / `login.live.com`):**
+- **Account picker:** Select the account. ✅ Continue.
+- **Consent screen:** Click "Accept". ✅ Continue.
+- **Login form:** STOP. Return `blocked: true` with `blocked_reason: "Microsoft SSO requires Microsoft login — browser session not authenticated"`.
+
+**Any other provider:** Same pattern — proceed through account pickers and consent screens; stop only if a credential form appears.
+
+#### SSO-3: Confirm Return to Application
+
+After SSO completes:
+1. `browser-wait-load { state: "networkidle" }`
+2. `browser-get-url` — confirm domain matches the original application URL (or a known ATS domain).
+3. If a popup/new tab was used for SSO, call `browser-tab-list` and `browser-tab-switch` back to the original tab.
+4. `browser-snapshot` — verify the application form or job posting is now visible.
+
+If the form is visible → **proceed directly to Step 3** (skip re-running Steps 1–2).
+If still on a login page → try the next available SSO provider (from SSO-1). After two failed SSO attempts → STOP with `blocked: true`.
+
+**Always record SSO attempts in the `notes` field** of the result (e.g. `"Used LinkedIn SSO — already authenticated, redirected back to Greenhouse form successfully"`).
+
+---
 
 ### Step 3: Identify the Application Form
 
@@ -450,7 +525,7 @@ Example - Blocked (Login Required):
 1. **ALWAYS read and follow the Site-Specific Instructions** from your Runtime Context. They contain critical platform-specific guidance (DOM selectors, modal flows, iframe handling, field patterns). The base instructions here are generic — the site-specific instructions refine them for the detected platform.
 2. **ALWAYS call `browser-snapshot` before interacting with any element.** Never guess at selectors — use the refs (`@e1`, `@e2`, etc.) or CSS selectors discovered from the snapshot's accessibility tree.
 3. **NEVER fabricate data.** If the user's profile doesn't contain the information needed for a field, mark it as `missing`. Do not make up phone numbers, addresses, or any personal details.
-4. **NEVER attempt to log in or create accounts.** If authentication is required **as observed in the actual page snapshot**, stop and report it with `blocked: true`.
+4. **NEVER enter email/password credentials or create accounts.** If a login form requires credentials, stop and report `blocked: true`. However, SSO buttons (LinkedIn, Google, etc.) that leverage the existing browser session ARE permitted — follow the SSO / Social Login Handling steps in Step 2a before blocking.
 5. **NEVER solve CAPTCHAs.** If detected, stop and report it with `blocked: true`.
 6. **NEVER skip required fields silently.** Every required field that cannot be filled MUST appear in the `fields` array with `status: "missing"`.
 7. **ALWAYS record every field you encounter** in the `fields` array — both filled and unfilled — so the system has a complete audit trail.

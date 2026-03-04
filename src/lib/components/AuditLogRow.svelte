@@ -9,7 +9,10 @@
 		InfoIcon,
 		ClockIcon,
 		BotIcon,
-		ExternalLinkIcon
+		ExternalLinkIcon,
+		ImageIcon,
+		Loader2Icon,
+		ChevronLeftIcon
 	} from '@lucide/svelte';
 	import type { AuditLogEntry } from '$lib/services/types';
 
@@ -69,10 +72,85 @@
 		entry.meta && typeof entry.meta.applicationId === 'number' ? entry.meta.applicationId : null
 	);
 
-	/** Meta entries excluding applicationId (rendered separately as a link). */
+	/** Meta entries excluding keys rendered as dedicated UI elements. */
+	const HIDDEN_META_KEYS = new Set(['applicationId', 'screenshotDir', 'pipelineRunId']);
 	const displayMeta = $derived.by(() => {
 		if (!entry.meta) return [];
-		return Object.entries(entry.meta).filter(([key]) => key !== 'applicationId');
+		return Object.entries(entry.meta).filter(([key]) => !HIDDEN_META_KEYS.has(key));
+	});
+
+	// ── Screenshots ────────────────────────────────────────────────────────────
+
+	const screenshotDir = $derived(
+		entry.meta && typeof entry.meta.screenshotDir === 'string' ? entry.meta.screenshotDir : null
+	);
+
+	interface ScreenshotFile {
+		name: string;
+		relPath: string;
+		size: number;
+		modifiedAt: string;
+	}
+
+	let screenshots = $state<ScreenshotFile[]>([]);
+	let screenshotsLoading = $state(false);
+	let screenshotsFetched = $state(false);
+	let lightboxIndex = $state<number | null>(null);
+
+	/** Convert an absolute data/logs/screenshots/... path to the run-relative
+	 *  query param by stripping the leading data/logs/screenshots/ prefix. */
+	function dirToRunParam(dir: string): string {
+		// Normalise slashes, strip leading data/logs/screenshots/
+		const norm = dir.replace(/\\/g, '/');
+		const prefix = 'data/logs/screenshots/';
+		const idx = norm.indexOf(prefix);
+		return idx >= 0 ? norm.slice(idx + prefix.length) : norm;
+	}
+
+	async function loadScreenshots(dir: string) {
+		if (screenshotsFetched) return;
+		screenshotsLoading = true;
+		try {
+			const run = dirToRunParam(dir);
+			const res = await fetch(`/api/admin/screenshots?run=${encodeURIComponent(run)}`);
+			if (res.ok) {
+				const data = await res.json();
+				screenshots = data.files ?? [];
+			}
+			screenshotsFetched = true;
+		} catch {
+			screenshotsFetched = true;
+		} finally {
+			screenshotsLoading = false;
+		}
+	}
+
+	function screenshotUrl(dir: string, relPath: string): string {
+		const run = dirToRunParam(dir);
+		return `/api/admin/screenshots?run=${encodeURIComponent(run)}&file=${encodeURIComponent(relPath)}`;
+	}
+
+	function openLightbox(idx: number) {
+		lightboxIndex = idx;
+	}
+
+	function closeLightbox() {
+		lightboxIndex = null;
+	}
+
+	function lightboxPrev() {
+		if (lightboxIndex !== null && lightboxIndex > 0) lightboxIndex--;
+	}
+
+	function lightboxNext() {
+		if (lightboxIndex !== null && lightboxIndex < screenshots.length - 1) lightboxIndex++;
+	}
+
+	// Load screenshots when the row is expanded and has a screenshotDir
+	$effect(() => {
+		if (expanded && screenshotDir) {
+			loadScreenshots(screenshotDir);
+		}
 	});
 </script>
 
@@ -189,6 +267,129 @@
 					</div>
 				</div>
 			{/if}
+
+			<!-- ── Screenshots strip ─────────────────────────────────────────── -->
+			{#if screenshotDir}
+				<div>
+					<h4
+						class="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase opacity-40"
+					>
+						<ImageIcon class="size-3" />
+						Screenshots
+						{#if screenshots.length > 0}
+							<span class="opacity-60">({screenshots.length})</span>
+						{/if}
+					</h4>
+
+					{#if screenshotsLoading}
+						<div class="flex items-center gap-2 py-2 text-xs opacity-40">
+							<Loader2Icon class="size-3 animate-spin" />
+							Loading…
+						</div>
+					{:else if screenshotsFetched && screenshots.length === 0}
+						<p class="text-xs italic opacity-40">No screenshots captured yet.</p>
+					{:else if screenshots.length > 0}
+						<div class="flex gap-2 overflow-x-auto pb-1">
+							{#each screenshots as shot, idx (shot.relPath)}
+								<button
+									type="button"
+									class="group relative shrink-0 overflow-hidden rounded border border-surface-200-800 transition-all hover:border-primary-500 hover:shadow-md"
+									onclick={(e) => {
+										e.stopPropagation();
+										openLightbox(idx);
+									}}
+									title={shot.relPath}
+								>
+									<img
+										src={screenshotUrl(screenshotDir, shot.relPath)}
+										alt={shot.name}
+										class="h-24 w-auto object-cover"
+										loading="lazy"
+									/>
+									<div
+										class="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 py-0.5 text-[9px] text-white opacity-0 transition-opacity group-hover:opacity-100"
+									>
+										{shot.name}
+									</div>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
+
+<!-- ── Lightbox ────────────────────────────────────────────────────────────── -->
+{#if lightboxIndex !== null && screenshotDir}
+	{@const shot = screenshots[lightboxIndex]}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+		onclick={closeLightbox}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') closeLightbox();
+			if (e.key === 'ArrowLeft') lightboxPrev();
+			if (e.key === 'ArrowRight') lightboxNext();
+		}}
+	>
+		<!-- Prev -->
+		{#if lightboxIndex > 0}
+			<button
+				type="button"
+				class="absolute top-1/2 left-4 -translate-y-1/2 rounded-full bg-white/10 p-2 hover:bg-white/20"
+				onclick={(e) => {
+					e.stopPropagation();
+					lightboxPrev();
+				}}
+				aria-label="Previous screenshot"
+			>
+				<ChevronLeftIcon class="size-6 text-white" />
+			</button>
+		{/if}
+
+		<!-- Image -->
+		<div
+			role="presentation"
+			class="flex max-h-[90vh] max-w-[90vw] flex-col items-center gap-3"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+		>
+			<div class="font-mono text-xs text-white/60">
+				{shot.relPath}
+				<span class="ml-2 opacity-50">{lightboxIndex + 1} / {screenshots.length}</span>
+			</div>
+			<img
+				src={screenshotUrl(screenshotDir, shot.relPath)}
+				alt={shot.name}
+				class="max-h-[80vh] max-w-[85vw] rounded object-contain shadow-2xl"
+			/>
+		</div>
+
+		<!-- Next -->
+		{#if lightboxIndex < screenshots.length - 1}
+			<button
+				type="button"
+				class="absolute top-1/2 right-4 -translate-y-1/2 rounded-full bg-white/10 p-2 hover:bg-white/20"
+				onclick={(e) => {
+					e.stopPropagation();
+					lightboxNext();
+				}}
+				aria-label="Next screenshot"
+			>
+				<ChevronRightIcon class="size-6 text-white" />
+			</button>
+		{/if}
+
+		<!-- Close -->
+		<button
+			type="button"
+			class="absolute top-4 right-4 rounded-full bg-white/10 p-1.5 hover:bg-white/20"
+			onclick={closeLightbox}
+			aria-label="Close"
+		>
+			<XCircleIcon class="size-5 text-white" />
+		</button>
+	</div>
+{/if}

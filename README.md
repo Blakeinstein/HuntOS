@@ -1,193 +1,248 @@
-# Auto Job Application — README
+# AutoApply
 
-This repository contains the Auto Job Application SvelteKit app and the Mastra agent configuration used by the project.
-
-This README explains how to set up the project, manage model providers, and how to switch models per-agent using environment variables. The project has been adapted to support multiple model providers using a provider factory so you can mix-and-match providers via provider-prefixed model strings.
+An automated job application assistant built with SvelteKit, Mastra agents, and browser automation via Chrome DevTools Protocol.
 
 ---
 
 ## Prerequisites
 
-- bun (recommended) — this project expects `bun` as the package manager/runner.
-- Node-compatible OS (Linux / macOS)
-- Chrome (for browser automation tooling / CDP) if you want browser-driven agents
+- **bun** — used as the package manager and script runner throughout
+- **Node.js** — required by some tooling (already bundled with bun)
+- **Google Chrome** (`google-chrome-stable`) — for browser-driven agent automation
+- **curl**, **lsof**, and **jq** — used by the Chrome CDP bootstrap script
 
 ---
 
-## Quickstart
+## Installation
 
-1. Clone the repository.
-
-2. Install dependencies:
 ```bash
 bun install
 ```
 
-3. Copy the example environment file and edit it:
+Copy the example environment file and fill in your API keys:
+
 ```bash
 cp .env.example .env
-# then edit `.env` and fill the API keys, model strings, and base URLs you need
 ```
 
-4. Start development server:
+---
+
+## Starting the app
+
+A single command starts everything:
+
 ```bash
+bun start
+```
+
+This runs `run-pty` with the project's `run-pty.json` configuration, launching three services in an interactive terminal dashboard:
+
+| Tile | Script | What it does |
+|------|--------|-------------|
+| **Chrome CDP** | `scripts/chrome-cdp.sh` | Clears the CDP port, starts Chrome with remote debugging on `:9222`, waits for it to be ready, runs `bun ab connect` to register the session, then keeps Chrome alive |
+| **Dev Server** | `scripts/dev.sh` | Starts the Vite / SvelteKit development server on `:5173` |
+| **Mastra Studio** | `scripts/studio.sh` | Starts Mastra Studio on `:4111` for agent/workflow inspection |
+
+### run-pty dashboard controls
+
+| Key | Action |
+|-----|--------|
+| `1` / `2` / `3` | Focus a specific service tile |
+| `Ctrl+Z` | Return to the dashboard overview |
+| `Ctrl+C` | Kill the focused service (or all services from the dashboard) |
+| `Enter` | Restart an exited service |
+
+All three services are shut down cleanly when you `Ctrl+C` from the dashboard — no dangling processes or blocked ports.
+
+### Running services individually
+
+Each script can also be run on its own:
+
+```bash
+# Chrome + CDP handshake only
+bun run chrome
+
+# Mastra Studio only
+bun run studio
+
+# Vite dev server only
 bun run dev
 ```
 
-5. (Optional) If you intend to use the browser automation tools (agent-browser), launch Chrome with remote debugging:
-```bash
-# example helper script present in package.json (use bun to run)
-bun run browser
-# Then connect the agent-browser / CDP client:
-bun run cdp
+---
+
+## URLs
+
+| Service | URL |
+|---------|-----|
+| App | http://localhost:5173 |
+| Mastra Studio | http://localhost:4111 |
+| Chrome DevTools | http://localhost:9222 |
+
+---
+
+## Scripts reference
+
+### `scripts/`
+
+| File | Purpose |
+|------|---------|
+| `scripts/chrome-cdp.sh` | Starts Chrome with CDP, connects agent-browser, keeps Chrome alive |
+| `scripts/dev.sh` | Starts the Vite dev server (`bun run dev`) |
+
+### `package.json` scripts
+
+| Command | What it runs |
+|---------|-------------|
+| `bun start` | `bunx run-pty run-pty.json` — full interactive dashboard |
+| `bun run dev` | Vite dev server directly |
+| `bun run build` | Production build |
+| `bun run preview` | Preview production build |
+| `bun run chrome` | `scripts/chrome-cdp.sh` — Chrome + CDP connect |
+| `bun run ab` | `agent-browser` CLI passthrough |
+| `bun run check` | SvelteKit sync + svelte-check |
+| `bun run lint` | Prettier + ESLint |
+| `bun run format` | Prettier write |
+
+---
+
+## Environment / model configuration
+
+All model and provider settings go in `.env`. See `.env.example` for the full list.
+
+### Key variables
+
+| Variable | Purpose |
+|----------|---------|
+| `DEFAULT_MODEL` | Fallback model used when no agent override is set |
+| `PROFILE_AGENT_MODEL` | Model for the profile agent |
+| `RESUME_AGENT_MODEL` | Model for the resume agent |
+| `JOB_APPLICATION_AGENT_MODEL` | Model for the browser-driven application agent |
+| `JOB_BOARD_AGENT_MODEL` | Model for job board scraping agents |
+| `JOB_BOARD_LINKEDIN_MODEL` | (Optional) LinkedIn-specific override |
+| `JOB_BOARD_GREENHOUSE_MODEL` | (Optional) Greenhouse-specific override |
+| `JOB_BOARD_GENERIC_MODEL` | (Optional) Generic board override |
+
+### Supported providers
+
+Model strings use the format `<provider>/<model-id>`, e.g. `openrouter/qwen/qwen3-30b-a3b-instruct-2507`.
+
+| Provider prefix | Required env var | Notes |
+|----------------|-----------------|-------|
+| `openrouter/` | `OPENROUTER_API_KEY` | |
+| `openai/` | `OPENAI_API_KEY` | |
+| `lmstudio/` | `LMSTUDIO_BASE_URL` | Usually `http://127.0.0.1:1234/v1` |
+| `github-models/` | `GITHUB_TOKEN` | |
+| `ollama/` | `OLLAMA_BASE_URL` | Usually `http://localhost:11434/api` |
+| `z-ai/` | `ZAI_API_KEY` | Falls back to OpenRouter if key not set |
+
+Provider wiring lives in `src/lib/mastra/providers/registry.ts`.
+
+---
+
+## Application layout
+
+```
+src/
+  lib/
+    mastra/          # Mastra agents, tools, prompts, provider registry
+    services/        # Backend services (DB, pipeline, email, job boards, …)
+    components/      # Shared Svelte components
+    stores/          # Svelte stores
+  routes/
+    applications/    # Kanban board and application detail
+    profiles/        # User profile editor
+    resume/          # Resume generation and template management
+    audit/           # Audit log viewer
+    settings/        # Settings pages
+      email/
+      job-boards/
+      resume/
+      admin/         # Admin panel (see below)
+    api/             # SvelteKit API endpoints
+
+scripts/             # Individual service start scripts
+run-pty.json         # run-pty service definitions
+data/                # Local runtime data (gitignored)
+  app.db             # Main SQLite database
+  memory.db          # Mastra memory database
+  resumes/           # Generated resume files (.md + .pdf)
+  user-resources/    # User-uploaded documents
+  logs/
+    screenshots/     # Per-run annotated screenshots from the browser agent
 ```
 
-6. Build for production:
-```bash
-bun run build
-# preview:
-bun run preview
-```
+---
+
+## Admin panel
+
+Navigate to **Settings → Admin** (`/settings/admin`) for internal tooling:
+
+### Database tab
+
+- Lists all SQLite tables with row counts
+- Click a table to browse rows (paginated, 100 per page, newest first)
+- **Double-click any cell** to edit it inline
+- **Wipe** button to delete all rows from a table (with confirmation)
+
+### Server Logs tab
+
+- Live-streams log output via SSE from the server process
+- Switch between **Dev Server**, **Mastra Studio**, and **Chrome** log sources
+- Colour-coded output (red = errors, yellow = warnings, green = ready/success)
+- Auto-scroll toggle, clear, and scroll-to-bottom controls
+
+### Data Files tab
+
+- Browses `data/resumes/`, `data/logs/screenshots/`, and `data/user-resources/`
+- Screenshots bucket walks nested run subdirectories automatically
+- Click any file to preview inline (images, PDFs, text/markdown)
+- Download or delete individual files
 
 ---
 
-## Environment / Model configuration
+## Audit log
 
-All model and provider configuration is placed in environment variables. The repository includes `.env.example`. Copy it to `.env` and provide appropriate keys/URLs.
+The **Audit Log** page (`/audit`) records every significant automated action:
 
-Key files:
-- `./.env.example` — example env file with comments
-- `./.env` — your actual runtime env (DO NOT commit)
+- Job board scraping runs
+- Browser agent iterations (with per-iteration annotated screenshots)
+- Resume generation
+- Profile updates
+- Pipeline steps (research → resume → apply)
 
-Important env variables (high level):
-- `DEFAULT_MODEL` — fallback provider-qualified model string used when no agent override is provided
-- Per-agent model overrides:
-  - `PROFILE_AGENT_MODEL`
-  - `RESUME_AGENT_MODEL`
-  - `JOB_APPLICATION_AGENT_MODEL`
-  - `JOB_BOARD_AGENT_MODEL`
-  - (Optional) `JOB_BOARD_LINKEDIN_MODEL`, `JOB_BOARD_GREENHOUSE_MODEL`, `JOB_BOARD_GENERIC_MODEL`
-
-Provider API keys / base URLs (examples):
-- OpenRouter:
-  - `OPENROUTER_API_KEY` (required if using `openrouter/...`)
-  - `OPENROUTER_BASE_URL` (optional)
-- OpenAI:
-  - `OPENAI_API_KEY`
-  - `OPENAI_BASE_URL` (optional)
-- LMStudio:
-  - `LMSTUDIO_API_KEY` (mostly optional; LMStudio often runs locally)
-  - `LMSTUDIO_BASE_URL` (optional — e.g. `http://127.0.0.1:1234/v1`)
-- GitHub Models:
-  - `GITHUB_TOKEN`
-  - `GITHUB_MODELS_BASE_URL` (optional)
-- Ollama:
-  - `OLLAMA_BASE_URL` (optional; default local `http://localhost:11434/api`)
-- Z.AI / Zhipu AI:
-  - `ZAI_API_KEY` (optional)
-  - `ZAI_BASE_URL` (optional; default `https://open.bigmodel.cn/api/paas/v4/`)
-
-Notes on `Z.AI` fallback:
-- If `ZAI_API_KEY` is set, `z-ai/...` model strings are called directly at the Z.AI API (or `ZAI_BASE_URL`).
-- If `ZAI_API_KEY` is NOT set, `z-ai/...` model strings are routed through OpenRouter (so `OPENROUTER_API_KEY` becomes necessary for those models).
+Expanding an audit entry shows the full detail, metadata, and — for browser agent entries — a **screenshot strip** of every iteration captured during that run. Click any thumbnail to open a full-screen lightbox with keyboard navigation (`←` / `→` / `Esc`).
 
 ---
 
-## Model string format
+## Data storage
 
-Model strings use the format:
-```
-<provider>/<model-path>
-```
+Everything is stored locally — there is no cloud dependency beyond the LLM API calls you configure.
 
-Examples:
-- `openrouter/qwen/qwen3-30b-a3b-instruct-2507`
-- `openai/gpt-4o`
-- `lmstudio/qwen/qwen3-30b-a3b-2507`
-- `github-models/ai21-labs/ai21-jamba-1.5-large`
-- `ollama/phi3`
-- `z-ai/glm-4.7-flash`
-
-A provider-prefixed string tells the internal factory which provider to use. The provider factory is implemented at:
-- `src/lib/mastra/providers/registry.ts`
-
-It returns a Mastra-compatible model configuration for the Mastra agents.
-
----
-
-## Where to change agent model choices
-
-Each agent reads its model from an environment variable (so you can swap providers without code edits). Example agent files:
-
-- `src/lib/mastra/agents/profile-agent.ts` — reads `PROFILE_AGENT_MODEL`
-- `src/lib/mastra/agents/resume-agent.ts` — reads `RESUME_AGENT_MODEL`
-- `src/lib/mastra/agents/job-application-agent/agent.ts` — reads `JOB_APPLICATION_AGENT_MODEL`
-- `src/lib/mastra/agents/job-board-agent/*` — orchestrator and specific board agents read from `JOB_BOARD_AGENT_MODEL` and optional per-board overrides
-
-You can set them directly in your `.env`:
-```env
-PROFILE_AGENT_MODEL=openrouter/qwen/qwen3-30b-a3b-instruct-2507
-RESUME_AGENT_MODEL=lmstudio/qwen/qwen3-30b-a3b-2507
-JOB_APPLICATION_AGENT_MODEL=openai/gpt-4o
-```
-
----
-
-## Provider implementations included
-
-This project supports and contains wiring for the following providers (the provider factory will resolve and instantiate them depending on your model strings and env vars):
-
-- OpenRouter (`@openrouter/ai-sdk-provider`)
-- OpenAI (`@ai-sdk/openai`) — used for `openai/` models and as an OpenAI-compatible client for some other flows
-- LMStudio (via OpenAI-compatible client when `LMSTUDIO_BASE_URL` is provided, otherwise uses the model-router string)
-- GitHub Models (via model-router string or OpenAI-compatible client when a custom `GITHUB_MODELS_BASE_URL` is set)
-- Ollama (`ollama-ai-provider-v2`) — for local Ollama servers
-- Z.AI / Zhipu AI — supports direct `ZAI_API_KEY` usage or fallback to OpenRouter
-
-If you need to add or change providers, see:
-- `src/lib/mastra/providers/registry.ts`
-
----
-
-## Local-only providers (notes)
-
-- LMStudio and Ollama are commonly run locally. If you run them locally, set the respective base URL in `.env` to point at your local server (for example, `LMSTUDIO_BASE_URL=http://127.0.0.1:1234/v1` or `OLLAMA_BASE_URL=http://localhost:11434/api`).
-- For Ollama, the project uses the `ollama-ai-provider-v2` community provider. If you prefer a different Ollama provider, you can replace the provider initialization in `registry.ts`.
-
----
-
-## Helpful scripts (package.json)
-
-Use `bun run <script>` to run the scripts defined in `package.json`:
-
-- `bun run dev` — starts Vite development server
-- `bun run build` — builds production
-- `bun run preview` — previews the production build
-- `bun run browser` — runs Chrome with remote debugging (helper for CDP)
-- `bun run cdp` — connect CDP client (script present)
-- `bun run studio` — start Mastra studio (if configured)
-
----
-
-## Code locations
-
-- Mastra configuration and agent wiring:
-  - `src/lib/mastra/index.ts`
-  - `src/lib/mastra/agents/` (agents)
-  - `src/lib/mastra/providers/registry.ts` (provider factory)
-- Prompts:
-  - `src/lib/mastra/prompts/` (Markdown prompts used by agents)
-- Tools:
-  - `src/lib/mastra/tools/`
+| Path | Contents |
+|------|---------|
+| `data/app.db` | Main application database (applications, profiles, audit logs, …) |
+| `data/memory.db` | Mastra agent memory (conversation history, embeddings) |
+| `data/resumes/` | Generated resumes as `.md` and `.pdf` pairs |
+| `data/user-resources/` | Documents you upload for the agents to reference |
+| `data/logs/screenshots/` | Annotated browser screenshots, one subdirectory per pipeline run |
+| `data/chrome/` | Chrome user data directory for the CDP session |
 
 ---
 
 ## Troubleshooting
 
-- If you see errors about missing API keys, make sure you copied `.env.example` to `.env` and provided the right keys (for OpenRouter, OpenAI, GitHub, etc.).
-- If a provider can't be reached, try configuring the base URL in `.env` (e.g. `OPENROUTER_BASE_URL`, `LMSTUDIO_BASE_URL`, `GITHUB_MODELS_BASE_URL`, `OLLAMA_BASE_URL`).
-- The `z-ai` provider will call OpenRouter if `ZAI_API_KEY` is not present. Make sure `OPENROUTER_API_KEY` is set if you rely on that fallback.
+**Chrome won't start / port 9222 already in use**
+`scripts/chrome-cdp.sh` evicts any existing process on `:9222` before starting. If it still fails, check `data/chrome.log` (written when running the script standalone) or the Chrome CDP tile output in the run-pty dashboard.
 
----
+**`agent-browser connect` fails**
+Make sure `agent-browser` is installed (`bun install`) and that Chrome is fully up before the connect step. The script waits for the port to accept connections before attempting the connect.
 
-If you want help picking good models for each agent role (fast vs. instruction-following vs. tool-reliability), tell me which providers you have access to and I can recommend model strings and configuration tips.
+**Missing API key errors**
+Copy `.env.example` to `.env` and fill in the keys for the providers you intend to use.
+
+**`z-ai/` model errors**
+If `ZAI_API_KEY` is not set, `z-ai/` model strings are routed through OpenRouter — ensure `OPENROUTER_API_KEY` is set.
+
+**LMStudio / Ollama not reachable**
+Set `LMSTUDIO_BASE_URL` or `OLLAMA_BASE_URL` in `.env` to point at your local server.

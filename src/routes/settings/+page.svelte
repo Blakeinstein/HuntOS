@@ -6,7 +6,8 @@
 		SettingsIcon,
 		ShieldIcon,
 		BellIcon,
-		FileTextIcon
+		FileTextIcon,
+		WrenchIcon
 	} from '@lucide/svelte';
 	import { resolve } from '$app/paths';
 </script>
@@ -120,6 +121,28 @@
 				</p>
 			</div>
 		</div>
+
+		<!-- Admin -->
+		<a
+			href={resolve('/settings/admin')}
+			class="group flex items-start gap-4 card border border-surface-200-800 bg-surface-50-950 p-5 transition-all hover:border-warning-500 hover:shadow-md md:col-span-2"
+		>
+			<div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-warning-500/10">
+				<WrenchIcon class="size-5 text-warning-500" />
+			</div>
+			<div class="min-w-0 flex-1">
+				<div class="flex items-center justify-between">
+					<h2 class="text-sm font-bold">Admin</h2>
+					<ChevronRightIcon
+						class="size-4 opacity-30 transition-transform group-hover:translate-x-0.5 group-hover:opacity-60"
+					/>
+				</div>
+				<p class="mt-0.5 text-xs opacity-60">
+					Inspect and mutate database tables, stream live server logs, and browse stored files
+					(resumes, screenshots, user resources).
+				</p>
+			</div>
+		</a>
 	</div>
 
 	<!-- Info section -->

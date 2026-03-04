@@ -1,0 +1,31 @@
+[
+	{
+		"title": "Dev Server",
+		"command": ["bash", "scripts/dev.sh"],
+		"status": {
+			"ready in": ["🟢", "R"],
+			"error": ["🔴", "E"],
+			"warn": ["🟡", "W"]
+		},
+		"defaultStatus": ["⏳", "~"]
+	},
+	{
+		"title": "Mastra Studio",
+		"command": ["bun", "run", "studio"],
+		"status": {
+			"Mastra Studio running|listening|ready|started": ["🟢", "R"],
+			"error": ["🔴", "E"]
+		},
+		"defaultStatus": ["⏳", "~"]
+	},
+	{
+		"title": "Chrome CDP",
+		"command": ["bash", "scripts/chrome-cdp.sh"],
+		"status": {
+			"agent-browser connected": ["🟢", "R"],
+			"DevTools listening": ["🟢", "R"],
+			"agent-browser connect failed|Could not retrieve CDP": ["🔴", "E"]
+		},
+		"defaultStatus": ["⏳", "~"]
+	}
+]
