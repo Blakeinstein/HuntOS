@@ -4,6 +4,7 @@ import { resolveLanguageModel } from '$lib/mastra/providers';
 import { logLLMError } from '$lib/services/helpers/formatLLMError';
 import type { ProfileService } from './profile';
 import type { ResumeAgentService } from './resumeAgent';
+import type { LinkSummaryVectorService } from './linkSummaryVector';
 import { ResumeGenerationService } from './resumeGeneration';
 import { typstResumeDataSchema, type TypstResumeData } from '../resume/typstSchema';
 import untruncateJson from 'untruncate-json';
@@ -73,6 +74,7 @@ function getDefaultConfig(): TypstResumeConfig {
 export class TypstResumeService {
 	private profileService: ProfileService;
 	private agentService: ResumeAgentService | null = null;
+	private linkSummaryVectorService: LinkSummaryVectorService | null = null;
 	private config: TypstResumeConfig;
 	private promptTemplate: string | null = null;
 
@@ -84,6 +86,11 @@ export class TypstResumeService {
 	/** Wire the agent service after Mastra has initialised. */
 	setAgentService(agentService: ResumeAgentService): void {
 		this.agentService = agentService;
+	}
+
+	/** Wire the link summary vector service for RAG context injection. */
+	setLinkSummaryVectorService(service: LinkSummaryVectorService): void {
+		this.linkSummaryVectorService = service;
 	}
 
 	// ── Public API ────────────────────────────────────────────────
@@ -101,6 +108,11 @@ export class TypstResumeService {
 		const profile = await this.profileService.getProfile();
 		const profileText = ResumeGenerationService.profileToText(profile);
 
+		// Gather link-summary context from the vector store (if available)
+		const linkSummariesContext = this.linkSummaryVectorService
+			? this.linkSummaryVectorService.getAllSummariesAsText()
+			: '';
+
 		// ── LLM step (agent-preferred, direct fallback) ───────────
 		let data: TypstResumeData;
 
@@ -108,7 +120,8 @@ export class TypstResumeService {
 			const output = await this.agentService.generate({
 				profileText,
 				jobDescription,
-				format: 'typst'
+				format: 'typst',
+				linkSummariesContext: linkSummariesContext || undefined
 			});
 			data = output.format === 'typst' ? output.data : (output.data as unknown as TypstResumeData);
 		} else {

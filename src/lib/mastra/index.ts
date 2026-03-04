@@ -8,6 +8,7 @@ import { createServices } from '$lib/services';
 import { db } from '$lib/db';
 import { createProfileAgent } from './agents/profile-agent';
 import { createResumeAgent } from './agents/resume-agent';
+import type { ResumeAgentDeps } from './agents/resume-agent';
 import {
 	createJobBoardAgent,
 	createJobBoardSubAgentRegistry,
@@ -25,7 +26,12 @@ const profileAgent = createProfileAgent(
 	services.auditLogService,
 	services.documentService
 );
-const resumeAgent = createResumeAgent();
+
+const resumeAgentDeps: ResumeAgentDeps = {
+	linkSummaryVectorService: services.linkSummaryVectorService,
+	auditLogService: services.auditLogService
+};
+const resumeAgent = createResumeAgent(resumeAgentDeps);
 const jobBoardAgent = createJobBoardAgent();
 
 // Job board scraping sub-agents — each is registered with dot-notation keys
@@ -101,5 +107,21 @@ export const mastra = new Mastra({
 
 // Wire late-bound services that depend on the Mastra instance
 services.withMastra(mastra, subAgentRegistry);
+
+// Backfill: embed any existing 'done' link summaries that aren't yet indexed.
+// This is a no-op if all summaries are already in the vector table.
+// Runs asynchronously so it never blocks startup.
+services.linkSummaryVectorService
+	.backfillMissingEmbeddings()
+	.then((count) => {
+		if (count > 0) {
+			console.info(
+				`[startup] Backfilled ${count} link summary embedding(s) into link_summary_vec.`
+			);
+		}
+	})
+	.catch((err) => {
+		console.warn('[startup] Link summary backfill failed (non-fatal):', err);
+	});
 
 export { services, subAgentRegistry };

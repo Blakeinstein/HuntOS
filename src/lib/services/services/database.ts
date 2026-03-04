@@ -253,19 +253,53 @@ export class Database {
 
       CREATE INDEX IF NOT EXISTS idx_step_logs_run_id ON pipeline_step_logs(pipeline_run_id);
       CREATE INDEX IF NOT EXISTS idx_step_logs_step ON pipeline_step_logs(pipeline_run_id, step);
+
+      -- ── Link Summaries ────────────────────────────────────────────
+      -- Stores AI-generated summaries for user profile links (GitHub, LinkedIn, Portfolio)
+      -- Keyed by link title so re-running summarize overwrites old data for the same link.
+      CREATE TABLE IF NOT EXISTS link_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        link_title TEXT NOT NULL UNIQUE,   -- matches ProfileLink.title (case-insensitive key)
+        link_url TEXT NOT NULL,
+        summary TEXT NOT NULL,             -- the generated markdown summary
+        summary_type TEXT NOT NULL,        -- 'github', 'linkedin', 'portfolio', 'generic'
+        status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'running', 'done', 'error'
+        error_message TEXT,
+        generated_at DATETIME,             -- when the last successful summary was produced
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_link_summaries_title ON link_summaries(link_title);
+      CREATE INDEX IF NOT EXISTS idx_link_summaries_status ON link_summaries(status);
     `);
 
-		// ── sqlite-vec virtual table ────────────────────────────────
+		// ── sqlite-vec virtual tables ───────────────────────────────
 		// vec0 virtual tables cannot use IF NOT EXISTS, so we guard manually.
-		const vecTableExists = this.get<{ name: string }>(
+		const docVecTableExists = this.get<{ name: string }>(
 			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'document_chunks_vec'`
 		);
-		if (!vecTableExists) {
+		if (!docVecTableExists) {
 			// 384 dimensions — matches a compact embedding model (e.g. text-embedding-3-small @ 384d)
 			// The chunk_id column links back to document_chunks.id for metadata lookups.
 			this.db.exec(`
         CREATE VIRTUAL TABLE document_chunks_vec USING vec0(
           chunk_id INTEGER PRIMARY KEY,
+          embedding float[384]
+        );
+      `);
+		}
+
+		// Vector table for link summaries (GitHub, LinkedIn, Portfolio, etc.)
+		// Each row stores the embedding for a single completed link summary,
+		// keyed by link_summary_id → link_summaries.id.
+		const linkSummaryVecExists = this.get<{ name: string }>(
+			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'link_summary_vec'`
+		);
+		if (!linkSummaryVecExists) {
+			this.db.exec(`
+        CREATE VIRTUAL TABLE link_summary_vec USING vec0(
+          link_summary_id INTEGER PRIMARY KEY,
           embedding float[384]
         );
       `);
@@ -280,7 +314,10 @@ export class Database {
 			`ALTER TABLE job_boards ADD COLUMN last_scraped_page INTEGER`,
 			`ALTER TABLE job_boards ADD COLUMN last_scraped_page_url TEXT`,
 			`ALTER TABLE job_boards ADD COLUMN last_page_scraped_at DATETIME`,
-			`ALTER TABLE job_boards ADD COLUMN page_retention_days INTEGER NOT NULL DEFAULT 3`
+			`ALTER TABLE job_boards ADD COLUMN page_retention_days INTEGER NOT NULL DEFAULT 3`,
+			// Work-authorization fields are stored as profile key/value rows — no schema change needed.
+			// link_summaries error_message column (added after initial release)
+			`ALTER TABLE link_summaries ADD COLUMN error_message TEXT`
 		];
 
 		for (const sql of migrations) {

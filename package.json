@@ -18,6 +18,7 @@
 		"ab": "agent-browser"
 	},
 	"dependencies": {
+		"@agent-infra/browser-context": "^0.2.2",
 		"@ai-sdk/openai": "^3.0.39",
 		"@ai-sdk/openai-compatible": "^2.0.33",
 		"@ai-sdk/svelte": "^4.0.86",

@@ -1,13 +1,15 @@
 // src/lib/services/services/resumeAgent.ts
 // Structured-output bridge to the Mastra `resume-agent`.
 //
-// Responsibility: given pre-serialised profile text and a job description,
-// invoke the agent with the correct format instructions injected via
-// RequestContext and return the typed structured data.
+// Responsibility: given pre-serialised profile text, a job description, and
+// optionally a block of link-summary context, invoke the agent with the
+// correct format instructions injected via RequestContext and return the
+// typed structured data.
 //
-// Everything before this call (profile load, prompt assembly) and after it
-// (template rendering, YAML serialisation, PDF compilation, history saving)
-// is handled by the calling service — this class owns only the LLM step.
+// Everything before this call (profile load, prompt assembly, link summary
+// retrieval) and after it (template rendering, YAML serialisation, PDF
+// compilation, history saving) is handled by the calling service — this
+// class owns only the LLM step.
 
 import type { Mastra } from '@mastra/core';
 import { RequestContext } from '@mastra/core/request-context';
@@ -26,6 +28,13 @@ export interface ResumeAgentInput {
 	jobDescription: string;
 	/** Determines which schema and format instructions are injected */
 	format: ResumeFormat;
+	/**
+	 * Optional block of link-summary context (GitHub, LinkedIn, Portfolio, etc.)
+	 * to append to the prompt so the agent has richer project/experience detail.
+	 * Produced by LinkSummaryVectorService.getAllSummariesAsText() or a targeted
+	 * semantic search. When omitted, the prompt contains only the base profile.
+	 */
+	linkSummariesContext?: string;
 }
 
 // Discriminated union so callers get typed data back without casting
@@ -79,7 +88,7 @@ export class ResumeAgentService {
 
 		const agent = this.mastra.getAgentById('resume-agent');
 
-		const prompt = buildPrompt(profileText, jobDescription);
+		const prompt = buildPrompt(profileText, jobDescription, input.linkSummariesContext);
 
 		// Inject format instructions via RequestContext so the agent's
 		// dynamicContext function can read them from requestContext.get(…).
@@ -123,8 +132,12 @@ export class ResumeAgentService {
  * The agent receives the profile and job description; format instructions
  * are injected separately via dynamic context so they stay decoupled.
  */
-function buildPrompt(profileText: string, jobDescription: string): string {
-	return [
+function buildPrompt(
+	profileText: string,
+	jobDescription: string,
+	linkSummariesContext?: string
+): string {
+	const parts: string[] = [
 		'## Candidate Profile',
 		'',
 		profileText.trim(),
@@ -132,5 +145,21 @@ function buildPrompt(profileText: string, jobDescription: string): string {
 		'## Job Description',
 		'',
 		jobDescription.trim()
-	].join('\n');
+	];
+
+	if (linkSummariesContext && linkSummariesContext.trim().length > 0) {
+		parts.push(
+			'',
+			'## Candidate Link Summaries',
+			'',
+			"The following are AI-generated summaries of the candidate's profile links " +
+				'(GitHub, LinkedIn, Portfolio, etc.). Use these to find richer project details, ' +
+				'open-source contributions, and accomplishments when tailoring the resume. ' +
+				'Do not fabricate anything not present in the summaries below.',
+			'',
+			linkSummariesContext.trim()
+		);
+	}
+
+	return parts.join('\n');
 }

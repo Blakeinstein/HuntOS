@@ -19,6 +19,9 @@ import { ApplicationResourceService } from '$lib/services/services/applicationRe
 import { ApplicationPipelineService } from '$lib/services/services/applicationPipeline';
 import { ApplyPipelineExecutor } from '$lib/services/services/applyPipelineExecutor';
 import { ResumeAgentService } from '$lib/services/services/resumeAgent';
+import { LinkSummaryService } from '$lib/services/services/linkSummary';
+import { LinkSummaryVectorService } from '$lib/services/services/linkSummaryVector';
+import { LinkSummaryQueue } from '$lib/services/services/linkSummaryQueue';
 import type { Mastra } from '@mastra/core';
 import type { SubAgentRegistry } from '$lib/mastra/agents/job-board-agent/registry';
 
@@ -43,6 +46,9 @@ export interface ServiceContainer {
 	applicationResourceService: ApplicationResourceService;
 	applicationPipelineService: ApplicationPipelineService;
 	applyPipelineExecutor: ApplyPipelineExecutor;
+	linkSummaryService: LinkSummaryService;
+	linkSummaryVectorService: LinkSummaryVectorService;
+	linkSummaryQueue: LinkSummaryQueue;
 
 	/**
 	 * Wire late-bound services that depend on the Mastra instance.
@@ -67,6 +73,14 @@ export function createServices(db: Database): ServiceContainer {
 	const jobBoardService = new JobBoardService(db);
 	const auditLogService = new AuditLogService(db);
 	const resumeAgentService = new ResumeAgentService();
+	const linkSummaryService = new LinkSummaryService(db);
+	const linkSummaryVectorService = new LinkSummaryVectorService(db, auditLogService);
+	const linkSummaryQueue = new LinkSummaryQueue(
+		auditLogService,
+		linkSummaryService,
+		profileService
+	);
+	linkSummaryQueue.setLinkSummaryVectorService(linkSummaryVectorService);
 	const documentService = new DocumentService(db, auditLogService);
 	const applicationService = new ApplicationService(db);
 	const swimlaneService = new SwimlaneService(db);
@@ -109,6 +123,9 @@ export function createServices(db: Database): ServiceContainer {
 		applicationResourceService,
 		applicationPipelineService,
 		applyPipelineExecutor,
+		linkSummaryService,
+		linkSummaryVectorService,
+		linkSummaryQueue,
 
 		withMastra(mastra: Mastra, subAgentRegistry: SubAgentRegistry) {
 			container.jobBoardScraperService = new JobBoardScraperService(
@@ -120,7 +137,9 @@ export function createServices(db: Database): ServiceContainer {
 			);
 			resumeAgentService.setMastra(mastra);
 			resumeGenerationService.setAgentService(resumeAgentService);
+			resumeGenerationService.setLinkSummaryVectorService(linkSummaryVectorService);
 			typstResumeService.setAgentService(resumeAgentService);
+			typstResumeService.setLinkSummaryVectorService(linkSummaryVectorService);
 			applyPipelineExecutor.setMastra(mastra);
 		}
 	};

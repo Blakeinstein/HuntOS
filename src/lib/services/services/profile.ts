@@ -41,6 +41,17 @@ export type ProfileKey =
 	| 'desired_work_arrangement'
 	| 'job_search_criteria'
 	| 'years_of_experience'
+	// Work authorization & immigration
+	| 'has_active_visa'
+	| 'visa_type'
+	| 'visa_expiry_date'
+	| 'work_auth_valid_until'
+	| 'needs_sponsorship'
+	| 'open_to_relocate'
+	| 'current_work_preference'
+	| 'immigration_notes'
+	// Additional application notes
+	| 'application_notes'
 	// Supplemental links (stored as JSON array)
 	| 'github_url'
 	| 'website_urls'
@@ -77,6 +88,17 @@ const VALID_PROFILE_KEYS: ProfileKey[] = [
 	'desired_work_arrangement',
 	'job_search_criteria',
 	'years_of_experience',
+	// Work authorization & immigration
+	'has_active_visa',
+	'visa_type',
+	'visa_expiry_date',
+	'work_auth_valid_until',
+	'needs_sponsorship',
+	'open_to_relocate',
+	'current_work_preference',
+	'immigration_notes',
+	// Additional application notes
+	'application_notes',
 	'github_url',
 	'website_urls',
 	'profile_links',
@@ -237,7 +259,9 @@ export class ProfileService {
 			{ key: 'job_titles', weight: 1 },
 			{ key: 'resume_summary', weight: 1 },
 			{ key: 'profile_description', weight: 2 },
-			{ key: 'projects', weight: 1 }
+			{ key: 'projects', weight: 1 },
+			{ key: 'needs_sponsorship', weight: 1 },
+			{ key: 'open_to_relocate', weight: 1 }
 		];
 
 		const allFields = [...requiredFields, ...bonusFields];
@@ -267,7 +291,9 @@ export class ProfileService {
 			'experience',
 			'desired_location',
 			'desired_job_type',
-			'job_titles'
+			'job_titles',
+			'needs_sponsorship',
+			'open_to_relocate'
 		];
 		const profile = await this.getProfile();
 

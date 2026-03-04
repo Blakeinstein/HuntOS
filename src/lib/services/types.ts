@@ -107,6 +107,21 @@ export type { PdfConversionOptions, PdfConversionResult } from '$lib/services/se
 
 export type { TypstResumeConfig, TypstResumeResult } from '$lib/services/services/typstResume';
 
-// ── App Settings ────────────────────────────────────────────────────
+// ── App Settings ────────────────────────────────────────────────────────────
 
 export type { ResumeFormat, AppSetting, AppSettingsMap } from '$lib/services/services/appSettings';
+
+// ── Link Summaries ───────────────────────────────────────────────────────────
+
+export type {
+	LinkSummary,
+	LinkSummaryType,
+	LinkSummaryStatus,
+	UpsertLinkSummaryOptions
+} from '$lib/services/services/linkSummary';
+
+export type {
+	LinkSummaryJob,
+	QueueState,
+	QueueStatus
+} from '$lib/services/services/linkSummaryQueue';

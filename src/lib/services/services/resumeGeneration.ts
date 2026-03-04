@@ -6,6 +6,7 @@ import { resolveLanguageModel } from '$lib/mastra/providers';
 import type { ProfileService, ProfileData } from './profile';
 import type { ResumeTemplateService, ResumeTemplate } from './resumeTemplate';
 import type { ResumeAgentService } from './resumeAgent';
+import type { LinkSummaryVectorService } from './linkSummaryVector';
 import { resumeDataSchema, type ResumeData } from '../resume/schema';
 import untruncateJson from 'untruncate-json';
 import fs from 'fs';
@@ -64,6 +65,7 @@ export class ResumeGenerationService {
 	private profileService: ProfileService;
 	private templateService: ResumeTemplateService;
 	private agentService: ResumeAgentService | null = null;
+	private linkSummaryVectorService: LinkSummaryVectorService | null = null;
 	private config: ResumeGenerationConfig;
 	private promptTemplate: string | null = null;
 
@@ -82,6 +84,11 @@ export class ResumeGenerationService {
 		this.agentService = agentService;
 	}
 
+	/** Wire the link summary vector service for RAG context injection. */
+	setLinkSummaryVectorService(service: LinkSummaryVectorService): void {
+		this.linkSummaryVectorService = service;
+	}
+
 	// ── Public API ────────────────────────────────────────────────
 
 	/**
@@ -98,6 +105,11 @@ export class ResumeGenerationService {
 		const profile = await this.profileService.getProfile();
 		const profileText = ResumeGenerationService.profileToText(profile);
 
+		// Gather link-summary context from the vector store (if available)
+		const linkSummariesContext = this.linkSummaryVectorService
+			? this.linkSummaryVectorService.getAllSummariesAsText()
+			: '';
+
 		// ── LLM step (agent-preferred, direct fallback) ───────────
 		let data: ResumeData;
 
@@ -105,7 +117,8 @@ export class ResumeGenerationService {
 			const output = await this.agentService.generate({
 				profileText,
 				jobDescription,
-				format: 'markdown'
+				format: 'markdown',
+				linkSummariesContext: linkSummariesContext || undefined
 			});
 			// TypeScript narrows the discriminated union
 			data = output.format === 'markdown' ? output.data : (output.data as unknown as ResumeData);

@@ -25,6 +25,15 @@ const profileKeyEnum = z.enum([
 	'desired_work_arrangement',
 	'job_search_criteria',
 	'years_of_experience',
+	// Work authorization & immigration
+	'has_active_visa',
+	'visa_type',
+	'needs_sponsorship',
+	'open_to_relocate',
+	'current_work_preference',
+	'immigration_notes',
+	// Additional application notes
+	'application_notes',
 	// Supplemental links
 	'github_url',
 	'website_urls',
@@ -43,10 +52,14 @@ export function createUpdateProfileTool(profileService: ProfileService) {
 		description:
 			'Update a single field in the user profile with structured data extracted from the conversation. ' +
 			'Use this tool whenever the user provides information about their professional background, ' +
-			'skills, experience, education, contact details, job preferences, or links. ' +
+			'skills, experience, education, contact details, job preferences, work authorization, or links. ' +
 			'For saving the comprehensive profile description, prefer the saveProfileDescription tool instead. ' +
 			'For array-type fields (skills, certifications, languages, job_titles, preferred_companies, website_urls), ' +
-			'pass the value as an array of strings.',
+			'pass the value as an array of strings. ' +
+			'For work authorization fields use: has_active_visa ("yes"/"no"/"citizen"), visa_type (string), ' +
+			'needs_sponsorship ("yes"/"no"/"future"), open_to_relocate ("yes"/"no"/"conditional"), ' +
+			'current_work_preference ("remote"/"hybrid"/"onsite"/"flexible"), immigration_notes (string). ' +
+			'For application_notes use a free-form string with any extra context the agent should know.',
 		inputSchema: z.object({
 			key: profileKeyEnum.describe('The profile field to update'),
 			value: z
@@ -119,7 +132,7 @@ export function createGetIncompleteFieldsTool(profileService: ProfileService) {
 			'Check which required profile fields are still missing or incomplete. ' +
 			'Use this to determine what questions to ask next and to guide the user toward ' +
 			'a complete profile. Required fields include: name, email, phone, skills, experience, ' +
-			'desired_location, desired_job_type, and job_titles.',
+			'desired_location, desired_job_type, job_titles, needs_sponsorship, and open_to_relocate.',
 		inputSchema: z.object({}),
 		outputSchema: z.object({
 			incompleteFields: z.array(z.string()),
@@ -129,7 +142,7 @@ export function createGetIncompleteFieldsTool(profileService: ProfileService) {
 		execute: async () => {
 			try {
 				const incompleteFields = await profileService.getIncompleteFields();
-				const totalRequired = 8; // matches the updated required keys in ProfileService
+				const totalRequired = 10; // matches the updated required keys in ProfileService
 				return {
 					incompleteFields,
 					totalRequired,

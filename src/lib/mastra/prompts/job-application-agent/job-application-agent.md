@@ -291,6 +291,9 @@ For each form field discovered in the snapshot, use semantic matching to determi
 | Current Company | Extract from most recent experience | |
 | Current Title / Job Title | Extract from most recent experience or `job_titles` | |
 | Education / Degree | `education` | |
+| Visa Type / Work Permit Type | `visa_type` | Only fill if field is present and `visa_type` is set |
+| Visa Expiry Date / Permit Expiry | `visa_expiry_date` | ISO date — only fill if `visa_expiry_date` is set in profile |
+| Work Authorization Valid Until / EAD End Date | `work_auth_valid_until` | ISO date — only fill if `work_auth_valid_until` is set; fall back to `visa_expiry_date` if blank |
 
 #### Handling Custom Questions
 
@@ -299,9 +302,16 @@ Many application forms include custom questions (e.g. "Why do you want to work a
 For these questions:
 
 1. **Yes/No / Boolean questions:** Answer based on the user profile if the information exists. If unsure, mark as `missing` and move on. Common patterns:
-   - "Are you authorized to work in..." → Check profile location and preferences
-   - "Do you require sponsorship?" → Check profile if available, otherwise mark missing
+   - "Are you authorized to work in..." → Use `has_active_visa` (`"yes"` / `"citizen"` → "Yes"; `"no"` → "No"). Fall back to profile location and preferences if not set.
+   - "Do you require sponsorship?" → Use `needs_sponsorship` (`"yes"` → "Yes"; `"no"` or `"future"` → "No" unless the question specifically covers future need). Mark `missing` if unset.
+   - "Is your work authorization set to expire?" / "Will your authorization expire within X months?" → Check `visa_expiry_date` or `work_auth_valid_until` against today's date and the threshold in the question. If neither date is set, mark `missing`.
    - "Are you 18 or older?" → Answer "Yes" (reasonable assumption)
+
+5. **Visa / work authorization date fields:** When a form asks for a visa expiry date, work authorization end date, or EAD/OPT end date:
+   - Use `visa_expiry_date` for visa/permit expiry questions.
+   - Use `work_auth_valid_until` for work-authorization end date questions (e.g. EAD expiry, OPT end date). If `work_auth_valid_until` is blank, fall back to `visa_expiry_date`.
+   - Format the date to match the field's expected format (MM/DD/YYYY, YYYY-MM-DD, DD/MM/YYYY, etc.) — inspect the placeholder or existing value to determine the format.
+   - If neither date is set in the profile, mark the field as `missing` and do not fabricate a date.
 
 2. **Free-text questions:** Use the Job Description and Resume Data to compose a thoughtful, relevant answer. Keep answers concise (2-4 sentences) unless the field has a higher character minimum.
 

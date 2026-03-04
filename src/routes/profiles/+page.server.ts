@@ -5,6 +5,7 @@ import { db } from '$lib/db';
 export const load: PageServerLoad = async ({ depends }) => {
 	depends('db:profile');
 	depends('db:documents');
+	depends('db:link-summaries');
 
 	const services = createServices(db);
 
@@ -13,12 +14,14 @@ export const load: PageServerLoad = async ({ depends }) => {
 	const completeness = await services.profileService.getCompletenessScore();
 	const documents = services.documentService.listDocuments();
 	const profileLinks = await services.profileService.getProfileLinks();
+	const linkSummaries = services.linkSummaryService.getAll();
 
 	return {
 		profile,
 		incompleteFields,
 		completeness,
 		documents,
-		profileLinks
+		profileLinks,
+		linkSummaries
 	};
 };
