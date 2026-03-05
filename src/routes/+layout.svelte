@@ -9,7 +9,8 @@
 		ScrollTextIcon,
 		PanelLeftCloseIcon,
 		PanelLeftOpenIcon,
-		FileTextIcon
+		FileTextIcon,
+		GithubIcon
 	} from '@lucide/svelte';
 
 	let { children } = $props();
@@ -60,7 +61,18 @@
 					</a>
 				</AppBar.Headline>
 				<AppBar.Trail>
-					<span class="badge preset-filled-surface-500 text-xs">v0.1</span>
+					<div class="flex items-center gap-3">
+						<a
+							href="https://github.com/Blakeinstein/HuntOS"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn-icon hover:preset-tonal"
+							aria-label="View HuntOS on GitHub"
+						>
+							<GithubIcon class="size-5" />
+						</a>
+						<span class="badge preset-filled-surface-500 text-xs">v0.1</span>
+					</div>
 				</AppBar.Trail>
 			</AppBar.Toolbar>
 		</AppBar>
