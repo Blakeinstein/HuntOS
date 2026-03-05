@@ -10,7 +10,8 @@ export type AuditLogCategory =
 	| 'resume'
 	| 'agent'
 	| 'profile'
-	| 'application';
+	| 'application'
+	| 'scheduler';
 
 /**
  * Severity / outcome status for an audit entry.

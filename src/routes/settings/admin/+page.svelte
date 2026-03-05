@@ -173,7 +173,7 @@
 	// LOGS TAB
 	// ─────────────────────────────────────────────────────────────────────────
 
-	type LogSource = 'dev' | 'chrome';
+	type LogSource = 'dev' | 'chrome' | 'scheduler';
 
 	let logSource = $state<LogSource>('dev');
 	let logAutoScroll = $state(true);
@@ -626,7 +626,7 @@
 			<div class="flex flex-wrap items-center gap-3">
 				<!-- Source selector -->
 				<div class="flex gap-1 rounded-lg border border-surface-200-800 p-1">
-					{#each [{ id: 'dev' as LogSource, label: 'Dev Server' }, { id: 'chrome' as LogSource, label: 'Chrome' }] as src (src.id)}
+					{#each [{ id: 'dev' as LogSource, label: 'Dev Server' }, { id: 'chrome' as LogSource, label: 'Chrome' }, { id: 'scheduler' as LogSource, label: 'Scheduler' }] as src (src.id)}
 						<button
 							type="button"
 							class="rounded px-3 py-1 text-xs font-medium transition-colors

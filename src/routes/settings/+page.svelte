@@ -7,7 +7,8 @@
 		ShieldIcon,
 		BellIcon,
 		FileTextIcon,
-		WrenchIcon
+		WrenchIcon,
+		BotIcon
 	} from '@lucide/svelte';
 	import { resolve } from '$app/paths';
 </script>
@@ -22,7 +23,7 @@
 	</div>
 
 	<!-- Settings cards grid — col 1: active, col 2: coming soon, rows matched by grid -->
-	<div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:grid-rows-3">
+	<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 		<!-- Col 1: active items -->
 		<!-- Resume format -->
 		<a
@@ -41,6 +42,27 @@
 				</div>
 				<p class="mt-0.5 text-xs opacity-60">
 					Choose between Markdown + Handlebars templates or Typst (NNJR) for resume generation.
+				</p>
+			</div>
+		</a>
+
+		<!-- Automation -->
+		<a
+			href={resolve('/settings/automation')}
+			class="group flex items-start gap-4 card border border-surface-200-800 bg-surface-50-950 p-5 transition-all hover:border-primary-500 hover:shadow-md"
+		>
+			<div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-500/10">
+				<BotIcon class="size-5 text-primary-500" />
+			</div>
+			<div class="min-w-0 flex-1">
+				<div class="flex items-center justify-between">
+					<h2 class="text-sm font-bold">Automation</h2>
+					<ChevronRightIcon
+						class="size-4 opacity-30 transition-transform group-hover:translate-x-0.5 group-hover:opacity-60"
+					/>
+				</div>
+				<p class="mt-0.5 text-xs opacity-60">
+					Configure auto-apply behavior, scraper schedules, cron patterns, and batch sizes.
 				</p>
 			</div>
 		</a>

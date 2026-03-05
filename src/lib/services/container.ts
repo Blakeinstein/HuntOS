@@ -22,6 +22,7 @@ import { ResumeAgentService } from '$lib/services/services/resumeAgent';
 import { LinkSummaryService } from '$lib/services/services/linkSummary';
 import { LinkSummaryVectorService } from '$lib/services/services/linkSummaryVector';
 import { LinkSummaryQueue } from '$lib/services/services/linkSummaryQueue';
+import { SchedulerService } from '$lib/services/services/scheduler';
 import type { Mastra } from '@mastra/core';
 import type { SubAgentRegistry } from '$lib/mastra/agents/job-board-agent/registry';
 
@@ -49,6 +50,7 @@ export interface ServiceContainer {
 	linkSummaryService: LinkSummaryService;
 	linkSummaryVectorService: LinkSummaryVectorService;
 	linkSummaryQueue: LinkSummaryQueue;
+	schedulerService: SchedulerService;
 
 	/**
 	 * Wire late-bound services that depend on the Mastra instance.
@@ -87,6 +89,8 @@ export function createServices(db: Database): ServiceContainer {
 	const browserAgentService = new BrowserAgentService(db, profileService, resumeService);
 	const applicationResourceService = new ApplicationResourceService(db);
 	const applicationPipelineService = new ApplicationPipelineService(db);
+	const emailMonitorService = new EmailMonitorService(db);
+
 	const applyPipelineExecutor = new ApplyPipelineExecutor({
 		applicationService,
 		pipelineService: applicationPipelineService,
@@ -100,6 +104,17 @@ export function createServices(db: Database): ServiceContainer {
 		appSettingsService,
 		typstResumeService,
 		resumeTemplateService
+	});
+
+	const schedulerService = new SchedulerService({
+		auditLogService,
+		emailMonitorService,
+		jobBoardService,
+		appSettingsService,
+		applicationService,
+		applicationPipelineService,
+		getJobBoardScraperService: () => container.jobBoardScraperService,
+		getApplyPipelineExecutor: () => container.applyPipelineExecutor
 	});
 
 	const container: ServiceContainer = {
@@ -116,7 +131,7 @@ export function createServices(db: Database): ServiceContainer {
 		swimlaneService,
 		jobBoardService,
 		jobBoardScraperService: null,
-		emailMonitorService: new EmailMonitorService(db),
+		emailMonitorService,
 		browserAgentService,
 		auditLogService,
 		documentService,
@@ -126,6 +141,7 @@ export function createServices(db: Database): ServiceContainer {
 		linkSummaryService,
 		linkSummaryVectorService,
 		linkSummaryQueue,
+		schedulerService,
 
 		withMastra(mastra: Mastra, subAgentRegistry: SubAgentRegistry) {
 			container.jobBoardScraperService = new JobBoardScraperService(

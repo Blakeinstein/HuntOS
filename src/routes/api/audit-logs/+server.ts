@@ -13,7 +13,8 @@ const VALID_CATEGORIES: AuditLogCategory[] = [
 	'resume',
 	'agent',
 	'profile',
-	'application'
+	'application',
+	'scheduler'
 ];
 const VALID_STATUSES: AuditLogStatus[] = ['info', 'success', 'warning', 'error'];
 

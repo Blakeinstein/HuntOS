@@ -110,4 +110,11 @@ export const mastra = new Mastra({
 // Wire late-bound services that depend on the Mastra instance
 services.withMastra(mastra, subAgentRegistry);
 
+// Initialize and start the scheduler (fire-and-forget — don't block module load)
+services.schedulerService
+	.init()
+	.then(() => services.schedulerService.start())
+	.then(() => logger.debug('Scheduler started'))
+	.catch((err) => logger.error('Failed to start scheduler', { error: String(err) }));
+
 export { services, subAgentRegistry };

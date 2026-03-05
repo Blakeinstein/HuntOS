@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Switch } from '@skeletonlabs/skeleton-svelte';
 	import {
 		GlobeIcon,
@@ -16,12 +17,30 @@
 		SearchIcon,
 		ListIcon,
 		DatabaseIcon,
-		BookmarkIcon
+		BookmarkIcon,
+		PowerIcon,
+		InfoIcon
 	} from '@lucide/svelte';
 	import ScrapeButton from '$lib/components/ScrapeButton.svelte';
 
 	let { data } = $props();
 	const jobBoards = $derived(data.jobBoards ?? []);
+	let scraperEnabled = $derived(data.scraperEnabled ?? true);
+	let togglingMaster = $state(false);
+
+	async function toggleMasterScraper(enabled: boolean) {
+		togglingMaster = true;
+		try {
+			await fetch('/api/settings/automation', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ scraperEnabled: enabled })
+			});
+			await invalidate('app:scraper-enabled');
+		} finally {
+			togglingMaster = false;
+		}
+	}
 
 	let formState = $state({
 		name: '',
@@ -142,7 +161,7 @@
 	<div class="flex items-start justify-between gap-4">
 		<div class="flex items-start gap-3">
 			<a
-				href="/settings"
+				href={resolve('/settings')}
 				class="mt-1 btn-icon btn-icon-sm preset-tonal"
 				aria-label="Back to settings"
 			>
@@ -165,14 +184,56 @@
 		</button>
 	</div>
 
+	<!-- Master scraper toggle -->
+	<div class="card border border-surface-200-800 bg-surface-50-950 p-4">
+		<div class="flex items-center justify-between">
+			<div class="flex items-center gap-3">
+				<div
+					class="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary-500/10"
+				>
+					<PowerIcon class="size-4 text-secondary-500" />
+				</div>
+				<div>
+					<p class="text-sm font-bold">Automated Scraping</p>
+					<p class="text-xs opacity-50">
+						{scraperEnabled
+							? 'Boards are scraped on their configured intervals'
+							: 'All automated scraping is paused'}
+					</p>
+				</div>
+			</div>
+			<Switch
+				checked={scraperEnabled}
+				disabled={togglingMaster}
+				onCheckedChange={(e) => toggleMasterScraper(e.checked)}
+			>
+				<Switch.Control>
+					<Switch.Thumb />
+				</Switch.Control>
+				<Switch.HiddenInput />
+			</Switch>
+		</div>
+		{#if !scraperEnabled}
+			<div
+				class="mt-3 flex items-start gap-2 rounded-lg border border-warning-500/20 bg-warning-500/5 p-3"
+			>
+				<InfoIcon class="mt-0.5 size-4 shrink-0 text-warning-500" />
+				<p class="text-xs text-warning-700 dark:text-warning-400">
+					Automated scraping is disabled. Individual boards will not be checked until this is turned
+					back on.
+				</p>
+			</div>
+		{/if}
+	</div>
+
 	<!-- Info notice -->
 	<div class="flex items-start gap-3 card border border-surface-200-800 bg-surface-50-950 p-4">
 		<SearchIcon class="mt-0.5 size-4 shrink-0 opacity-40" />
 		<div>
 			<p class="text-xs opacity-60">
 				Job boards are periodically scraped for new postings using browser automation. New postings
-				are automatically added to the <strong>Backlog</strong> swimlane. Currently supported boards include
-				LinkedIn, Indeed, Glassdoor, and others.
+				are automatically added to the <strong>Backlog</strong> swimlane. Each board's
+				<strong>Check Interval</strong> determines how often it is scraped.
 			</p>
 		</div>
 	</div>
@@ -221,7 +282,7 @@
 									<a
 										href={board.base_url}
 										target="_blank"
-										rel="noopener noreferrer"
+										rel="external noopener noreferrer"
 										class="truncate text-xs text-primary-500 hover:underline"
 									>
 										{board.base_url}

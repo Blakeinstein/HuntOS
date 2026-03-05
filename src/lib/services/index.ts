@@ -21,6 +21,8 @@ export * from '$lib/services/services/textExtractor';
 export * from '$lib/services/services/applicationResource';
 export * from '$lib/services/services/applicationPipeline';
 export * from '$lib/services/services/applyPipelineExecutor';
+export * from '$lib/services/services/scheduler';
+export * from '$lib/services/services/schedulerLogger';
 
 export type {
 	Application,
@@ -72,3 +74,5 @@ export type {
 } from '$lib/services/services/applicationPipeline';
 export { PIPELINE_STEPS, PIPELINE_STEP_LABELS } from '$lib/services/services/applicationPipeline';
 export type { PipelineExecutionResult } from '$lib/services/services/applyPipelineExecutor';
+export type { SchedulerDeps, SchedulerJobStatus } from '$lib/services/services/scheduler';
+export { SCHEDULER_LOG_PATH } from '$lib/services/services/schedulerLogger';

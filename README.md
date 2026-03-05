@@ -101,7 +101,6 @@ bun run dev       # Vite dev server only
 |---|---|
 | **HuntOS App** | http://localhost:5173 |
 | **Mastra Studio** | http://localhost:4111 |
-| **Chrome DevTools** | http://localhost:9222 |
 
 ---
 
@@ -113,7 +112,6 @@ bun run dev       # Vite dev server only
 |---|---|
 | `scripts/chrome-cdp.sh` | Starts Chrome with CDP, connects agent-browser, keeps Chrome alive |
 | `scripts/dev.sh` | Starts the Vite dev server (`bun run dev`) |
-| `scripts/generate-favicons.ts` | Regenerates the full favicon set from `static/logo.svg` |
 
 ### `package.json` scripts
 
@@ -126,7 +124,6 @@ bun run dev       # Vite dev server only
 | `bun run chrome` | `scripts/chrome-cdp.sh` — Chrome + CDP connect |
 | `bun run studio` | Mastra Studio |
 | `bun run ab` | `agent-browser` CLI passthrough |
-| `bun run favicons` | Regenerate favicon set from SVG source |
 | `bun run check` | SvelteKit sync + svelte-check |
 | `bun run lint` | Prettier + ESLint |
 | `bun run format` | Prettier write |
@@ -255,33 +252,6 @@ Everything is stored locally — no cloud dependency beyond the LLM API calls yo
 | `data/user-resources/` | Documents you upload for the agents to reference |
 | `data/logs/screenshots/` | Annotated browser screenshots, one subdirectory per pipeline run |
 | `data/chrome/` | Chrome user data directory for the CDP session |
-
----
-
-## Favicon set
-
-The full favicon set is generated from `static/logo.svg` using `sharp`. To regenerate after logo changes:
-
-```bash
-bun run favicons
-```
-
-This writes the following assets to `static/`:
-
-| File | Purpose |
-|---|---|
-| `favicon.ico` | 16×16 + 32×32 + 48×48 multi-size ICO |
-| `favicon-16x16.png` | Standard browser tab |
-| `favicon-32x32.png` | Retina browser tab |
-| `favicon-48x48.png` | Windows taskbar |
-| `favicon-96x96.png` | Google TV / high-DPI |
-| `apple-touch-icon.png` | 180×180 iOS home screen |
-| `android-chrome-192x192.png` | Android home screen |
-| `android-chrome-512x512.png` | Android splash screen |
-| `mstile-150x150.png` | Windows pinned tile |
-| `og-image.png` | 1200×630 Open Graph / Twitter card |
-| `site.webmanifest` | PWA manifest |
-| `browserconfig.xml` | IE11 / legacy Edge tile config |
 
 ---
 
