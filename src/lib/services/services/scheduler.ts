@@ -684,8 +684,12 @@ export class SchedulerService {
 	}
 
 	/**
-	 * Auto-apply: pick the first N applications from the Backlog swimlane
-	 * and run the full apply pipeline on each of them in parallel.
+	 * Auto-apply: pick the oldest application from the Backlog swimlane and
+	 * run the full apply pipeline on it.
+	 *
+	 * Only one application is processed at a time because the browser agent
+	 * is a shared singleton. If any pipeline is already running (from a
+	 * previous tick or a manual trigger) this tick is skipped entirely.
 	 */
 	private async runAutoApply(): Promise<void> {
 		const {
@@ -696,12 +700,10 @@ export class SchedulerService {
 			getApplyPipelineExecutor
 		} = this.deps;
 
-		const batchSize = appSettingsService.autoApplyBatchSize;
-
 		const finish = auditLogService.start({
 			category: 'scheduler',
 			agent_id: 'scheduler.auto-apply',
-			title: `Scheduled auto-apply (batch=${batchSize})`
+			title: 'Scheduled auto-apply (1 at a time)'
 		});
 
 		try {
@@ -725,9 +727,26 @@ export class SchedulerService {
 				return;
 			}
 
+			// Skip this tick entirely if any pipeline is already running globally.
+			// The browser agent is a shared singleton — running two pipelines in
+			// parallel would cause them to interfere with each other.
+			const globalActiveRun = applicationPipelineService.getGlobalActiveRun();
+			if (globalActiveRun) {
+				schedulerLogger.info(
+					`[${JOB_AUTO_APPLY}] A pipeline is already running (app=${globalActiveRun.application_id}, run=${globalActiveRun.id}) — skipping this tick`
+				);
+				finish({
+					status: 'info',
+					detail: `Pipeline already running for application ${globalActiveRun.application_id} — skipped`
+				});
+				return;
+			}
+
 			// Get all backlog applications (sorted by created_at ASC — oldest first)
-			const allBacklog = await applicationService.getApplications();
-			const backlogApps = allBacklog.filter((app) => app.swimlane_name.toLowerCase() === 'backlog');
+			const allApps = await applicationService.getApplications();
+			const backlogApps = allApps
+				.filter((app) => app.swimlane_name.toLowerCase() === 'backlog')
+				.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
 			if (backlogApps.length === 0) {
 				schedulerLogger.info(`[${JOB_AUTO_APPLY}] No applications in Backlog — skipping`);
@@ -735,84 +754,37 @@ export class SchedulerService {
 				return;
 			}
 
-			// Sort oldest first and pick the first N
-			const sorted = backlogApps.sort(
-				(a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-			);
-			const batch = sorted.slice(0, batchSize);
+			// Pick the oldest backlog application
+			const app = backlogApps[0];
+			const appLabel = `${app.company} — ${app.title} (id=${app.id})`;
 
 			schedulerLogger.info(
-				`[${JOB_AUTO_APPLY}] Processing ${batch.length} application(s) from ${backlogApps.length} in Backlog`
+				`[${JOB_AUTO_APPLY}] Starting pipeline for: ${appLabel} (${backlogApps.length} remaining in Backlog)`
 			);
 
-			// Filter out applications that already have an active pipeline run
-			const eligibleApps = batch.filter((app) => !applicationPipelineService.hasActiveRun(app.id));
+			const result = await executor.execute(app.id);
 
-			if (eligibleApps.length === 0) {
+			if (result.success) {
 				schedulerLogger.info(
-					`[${JOB_AUTO_APPLY}] All ${batch.length} selected applications already have active pipelines — skipping`
+					`[${JOB_AUTO_APPLY}] ✓ Pipeline succeeded for: ${appLabel} (runId=${result.pipelineRunId})`
 				);
-				finish({
-					status: 'info',
-					detail: `All ${batch.length} selected applications already have active pipelines`
-				});
-				return;
+			} else {
+				schedulerLogger.warn(
+					`[${JOB_AUTO_APPLY}] ✗ Pipeline failed for: ${appLabel} — ${result.error}`
+				);
 			}
 
-			schedulerLogger.info(
-				`[${JOB_AUTO_APPLY}] ${eligibleApps.length} eligible (${batch.length - eligibleApps.length} already running)`
-			);
-
-			// Execute all eligible applications in parallel
-			const results = await Promise.allSettled(
-				eligibleApps.map(async (app) => {
-					const appLabel = `${app.company} — ${app.title} (id=${app.id})`;
-					schedulerLogger.info(`[${JOB_AUTO_APPLY}] Starting pipeline for: ${appLabel}`);
-
-					try {
-						const result = await executor.execute(app.id);
-
-						if (result.success) {
-							schedulerLogger.info(
-								`[${JOB_AUTO_APPLY}] ✓ Pipeline succeeded for: ${appLabel} (runId=${result.pipelineRunId})`
-							);
-						} else {
-							schedulerLogger.warn(
-								`[${JOB_AUTO_APPLY}] ✗ Pipeline failed for: ${appLabel} — ${result.error}`
-							);
-						}
-
-						return { applicationId: app.id, ...result };
-					} catch (err) {
-						const detail = err instanceof Error ? err.message : String(err);
-						schedulerLogger.error(
-							`[${JOB_AUTO_APPLY}] ✗ Pipeline threw for: ${appLabel} — ${detail}`
-						);
-						throw err;
-					}
-				})
-			);
-
-			// Summarize results
-			const succeeded = results.filter((r) => r.status === 'fulfilled' && r.value.success).length;
-			const failed = results.filter(
-				(r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)
-			).length;
-
-			const summary = `Processed ${eligibleApps.length} applications: ${succeeded} succeeded, ${failed} failed`;
-
-			schedulerLogger.info(`[${JOB_AUTO_APPLY}] ${summary}`);
-
 			finish({
-				status: failed === 0 ? 'success' : 'warning',
-				detail: summary,
+				status: result.success ? 'success' : 'warning',
+				detail: result.success
+					? `Pipeline completed for ${app.company} — ${app.title}`
+					: `Pipeline failed for ${app.company} — ${app.title}: ${result.error}`,
 				meta: {
-					batchSize,
-					backlogTotal: backlogApps.length,
-					eligible: eligibleApps.length,
-					succeeded,
-					failed,
-					applicationIds: eligibleApps.map((a) => a.id)
+					applicationId: app.id,
+					pipelineRunId: result.pipelineRunId,
+					backlogRemaining: backlogApps.length - 1,
+					success: result.success,
+					error: result.error ?? null
 				}
 			});
 		} catch (err) {

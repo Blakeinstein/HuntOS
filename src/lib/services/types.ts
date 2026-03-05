@@ -21,7 +21,8 @@ export type {
 
 // ── Swimlane ────────────────────────────────────────────────────────
 
-export type { Swimlane } from '$lib/services/services/swimlane';
+export type { Swimlane, NonRemovableSwimlane } from '$lib/services/services/swimlane';
+export { NON_REMOVABLE_SWIMLANES } from '$lib/services/services/swimlane';
 
 // ── Profile ─────────────────────────────────────────────────────────
 

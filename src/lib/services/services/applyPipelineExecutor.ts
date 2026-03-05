@@ -669,6 +669,17 @@ export class ApplyPipelineExecutor {
 		});
 
 		try {
+			// ── Move to "In Progress" swimlane ───────────────────────
+			const inProgressSwimlane = await this.findSwimlaneByName('In Progress');
+			if (inProgressSwimlane) {
+				await this.applicationService.moveApplication(
+					applicationId,
+					inProgressSwimlane,
+					'Apply pipeline started — processing',
+					'system'
+				);
+			}
+
 			// ── Step 1: Research ─────────────────────────────────────
 			let research: ResearchResult;
 

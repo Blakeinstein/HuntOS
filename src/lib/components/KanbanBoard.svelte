@@ -1,12 +1,17 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
 	import { PlusIcon, TrashIcon } from '@lucide/svelte';
-	import type { ApplicationWithSwimlane, Swimlane } from '$lib/services/types';
+	import type { ApplicationWithSwimlane, Swimlane, PipelineRun } from '$lib/services/types';
+	import { NON_REMOVABLE_SWIMLANES } from '$lib/services/types';
 	import KanbanCard from './KanbanCard.svelte';
 	import AddSwimlaneDialog from './AddSwimlaneDialog.svelte';
 
+	interface ApplicationWithPipeline extends ApplicationWithSwimlane {
+		active_pipeline_run: PipelineRun | null;
+	}
+
 	interface Props {
-		applications: ApplicationWithSwimlane[];
+		applications: ApplicationWithPipeline[];
 		swimlanes: Swimlane[];
 	}
 
@@ -16,8 +21,14 @@
 	let dragOverSwimlaneId = $state<number | null>(null);
 	let showAddSwimlane = $state(false);
 
-	function getApplicationsForSwimlane(swimlaneId: number): ApplicationWithSwimlane[] {
+	function getApplicationsForSwimlane(swimlaneId: number): ApplicationWithPipeline[] {
 		return applications.filter((app) => app.status_swimlane_id === swimlaneId);
+	}
+
+	function isNonRemovable(swimlaneName: string): boolean {
+		return NON_REMOVABLE_SWIMLANES.includes(
+			swimlaneName as (typeof NON_REMOVABLE_SWIMLANES)[number]
+		);
 	}
 
 	function handleDragStart(event: DragEvent, applicationId: number) {
@@ -95,6 +106,8 @@
 		switch (name.toLowerCase()) {
 			case 'backlog':
 				return 'border-t-surface-500';
+			case 'in progress':
+				return 'border-t-tertiary-500';
 			case 'applied':
 				return 'border-t-primary-500';
 			case 'rejected':
@@ -103,6 +116,15 @@
 				return 'border-t-warning-500';
 			default:
 				return 'border-t-secondary-500';
+		}
+	}
+
+	function getSwimlaneHeaderAccent(name: string): string {
+		switch (name.toLowerCase()) {
+			case 'in progress':
+				return 'text-tertiary-500';
+			default:
+				return '';
 		}
 	}
 </script>
@@ -129,6 +151,8 @@
 		{#each swimlanes as swimlane (swimlane.id)}
 			{@const swimlaneApps = getApplicationsForSwimlane(swimlane.id)}
 			{@const isDragOver = dragOverSwimlaneId === swimlane.id}
+			{@const canDelete = swimlane.is_custom && !isNonRemovable(swimlane.name)}
+			{@const isInProgress = swimlane.name.toLowerCase() === 'in progress'}
 			<div
 				class="flex max-w-[320px] min-w-75 shrink-0 flex-col rounded-lg border-t-4 bg-surface-50-950 shadow-sm {getSwimlaneColor(
 					swimlane.name
@@ -144,12 +168,21 @@
 				<!-- Swimlane header -->
 				<div class="flex items-center justify-between border-b border-surface-200-800 px-3 py-2.5">
 					<div class="flex items-center gap-2">
-						<h2 class="text-sm font-bold">{swimlane.name}</h2>
-						<span class="badge preset-outlined-surface-500 text-xs">
+						<h2
+							class="text-sm font-bold {getSwimlaneHeaderAccent(swimlane.name)}"
+							class:animate-pulse={isInProgress && swimlaneApps.length > 0}
+						>
+							{swimlane.name}
+						</h2>
+						<span
+							class="badge text-xs"
+							class:preset-filled-tertiary-500={isInProgress && swimlaneApps.length > 0}
+							class:preset-outlined-surface-500={!isInProgress || swimlaneApps.length === 0}
+						>
 							{swimlaneApps.length}
 						</span>
 					</div>
-					{#if swimlane.is_custom}
+					{#if canDelete}
 						<button
 							type="button"
 							class="btn-icon btn-icon-sm hover:preset-tonal-error"
@@ -166,6 +199,7 @@
 					{#each swimlaneApps as application (application.id)}
 						<KanbanCard
 							{application}
+							activePipelineRun={application.active_pipeline_run}
 							isDragging={draggingId === application.id}
 							onDragStart={(e) => handleDragStart(e, application.id)}
 							onDragEnd={handleDragEnd}

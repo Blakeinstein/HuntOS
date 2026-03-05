@@ -312,6 +312,23 @@ export class ApplicationPipelineService {
 		return (row?.count ?? 0) > 0;
 	}
 
+	/**
+	 * Get the single active pipeline run across ALL applications (if any).
+	 *
+	 * Because the browser agent is a shared singleton, only one application
+	 * can be processed at a time. This method is used by the scheduler and
+	 * the apply API to enforce that constraint.
+	 */
+	getGlobalActiveRun(): PipelineRun | null {
+		const row = this.db.get<PipelineRunRow>(
+			`SELECT * FROM application_pipeline_runs
+			 WHERE status IN ('running', 'pending')
+			 ORDER BY created_at DESC
+			 LIMIT 1`
+		);
+		return row ? this.hydrate(row) : null;
+	}
+
 	// ── Delete ──────────────────────────────────────────────────────
 
 	/**

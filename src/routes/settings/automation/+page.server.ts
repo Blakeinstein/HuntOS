@@ -8,7 +8,6 @@ export const load: PageServerLoad = async ({ fetch }) => {
 		settings: data.settings ?? {
 			autoApplyEnabled: false,
 			autoApplyCron: '0 */5 * * * *',
-			autoApplyBatchSize: 3,
 			scraperEnabled: true,
 			emailSyncCron: '0 */30 * * * *',
 			auditCleanupEnabled: false,

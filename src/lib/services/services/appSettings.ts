@@ -175,17 +175,6 @@ export class AppSettingsService {
 		this.set('auto_apply_enabled', enabled ? 'true' : 'false');
 	}
 
-	/** Number of applications to process per auto-apply tick. */
-	get autoApplyBatchSize(): number {
-		const raw = this.get('auto_apply_batch_size');
-		const n = parseInt(raw, 10);
-		return Number.isFinite(n) && n > 0 ? n : 3;
-	}
-
-	set autoApplyBatchSize(size: number) {
-		this.set('auto_apply_batch_size', String(Math.max(1, Math.min(10, Math.round(size)))));
-	}
-
 	/** Cron pattern for auto-apply. */
 	get autoApplyCron(): string {
 		return this.get('auto_apply_cron');
@@ -239,7 +228,6 @@ export class AppSettingsService {
 		return {
 			autoApplyEnabled: this.autoApplyEnabled,
 			autoApplyCron: this.autoApplyCron,
-			autoApplyBatchSize: this.autoApplyBatchSize,
 			scraperEnabled: this.scraperEnabled,
 			emailSyncCron: this.emailSyncCron,
 			auditCleanupEnabled: this.auditCleanupEnabled,

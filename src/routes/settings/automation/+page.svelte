@@ -8,7 +8,6 @@
 		GlobeIcon,
 		MailIcon,
 		TrashIcon,
-		ZapIcon,
 		RefreshCwIcon,
 		CheckCircleIcon,
 		AlertCircleIcon,
@@ -32,7 +31,6 @@
 
 	let _autoApplyEnabled = $state<boolean | null>(null);
 	let _autoApplyCron = $state<string | null>(null);
-	let _autoApplyBatchSize = $state<string | null>(null);
 	let _scraperEnabled = $state<boolean | null>(null);
 	let _auditCleanupEnabled = $state<boolean | null>(null);
 	let _auditCleanupCron = $state<string | null>(null);
@@ -40,9 +38,6 @@
 	// Effective form values: local override ?? server value
 	let autoApplyEnabled = $derived(_autoApplyEnabled ?? serverSettings.autoApplyEnabled);
 	let autoApplyCron = $derived(_autoApplyCron ?? serverSettings.autoApplyCron);
-	let autoApplyBatchSize = $derived(
-		_autoApplyBatchSize ?? String(serverSettings.autoApplyBatchSize)
-	);
 	let scraperEnabled = $derived(_scraperEnabled ?? serverSettings.scraperEnabled);
 	let auditCleanupEnabled = $derived(_auditCleanupEnabled ?? serverSettings.auditCleanupEnabled);
 	let auditCleanupCron = $derived(_auditCleanupCron ?? serverSettings.auditCleanupCron);
@@ -56,7 +51,6 @@
 	let hasChanges = $derived(
 		_autoApplyEnabled !== null ||
 			_autoApplyCron !== null ||
-			_autoApplyBatchSize !== null ||
 			_scraperEnabled !== null ||
 			_auditCleanupEnabled !== null ||
 			_auditCleanupCron !== null
@@ -66,7 +60,6 @@
 	function clearOverrides() {
 		_autoApplyEnabled = null;
 		_autoApplyCron = null;
-		_autoApplyBatchSize = null;
 		_scraperEnabled = null;
 		_auditCleanupEnabled = null;
 		_auditCleanupCron = null;
@@ -90,15 +83,6 @@
 		{ value: '0 0 0 1 * *', label: 'Monthly (1st at midnight)' }
 	];
 
-	const batchSizeOptions = [
-		{ value: '1', label: '1 application' },
-		{ value: '2', label: '2 applications' },
-		{ value: '3', label: '3 applications' },
-		{ value: '5', label: '5 applications' },
-		{ value: '8', label: '8 applications' },
-		{ value: '10', label: '10 applications' }
-	];
-
 	// ── Save ────────────────────────────────────────────────────────
 
 	async function saveSettings() {
@@ -112,7 +96,6 @@
 				body: JSON.stringify({
 					autoApplyEnabled,
 					autoApplyCron: autoApplyCron.trim(),
-					autoApplyBatchSize: Number(autoApplyBatchSize),
 					scraperEnabled,
 					auditCleanupEnabled,
 					auditCleanupCron: auditCleanupCron.trim()
@@ -360,16 +343,17 @@
 		>
 			<InfoIcon class="mt-0.5 size-4 shrink-0 text-primary-500" />
 			<p class="text-xs opacity-70">
-				When enabled, the scheduler automatically picks applications from the <strong
+				When enabled, the scheduler automatically picks the oldest application from the <strong
 					>Backlog</strong
 				>
-				swimlane (oldest first) and runs the full apply pipeline (Research → Resume → Apply) on each one.
-				Configure the interval and batch size below.
+				swimlane and runs the full apply pipeline (Research → Resume → Apply) on it. Only
+				<strong>one application is processed at a time</strong> — the next tick is skipped if a pipeline
+				is still running.
 			</p>
 		</div>
 
 		<div
-			class="grid gap-4 transition-opacity md:grid-cols-2"
+			class="transition-opacity"
 			class:opacity-50={!autoApplyEnabled}
 			class:pointer-events-none={!autoApplyEnabled}
 		>
@@ -409,24 +393,6 @@
 						autoApplyCron
 					)}
 				</p>
-			</label>
-
-			<!-- Batch size -->
-			<label class="label">
-				<span class="flex items-center gap-1.5 text-sm font-medium">
-					<ZapIcon class="size-3.5 opacity-50" />
-					Batch Size
-				</span>
-				<select
-					class="select mt-1"
-					value={autoApplyBatchSize}
-					onchange={(e) => (_autoApplyBatchSize = e.currentTarget.value)}
-				>
-					{#each batchSizeOptions as opt (opt.value)}
-						<option value={opt.value}>{opt.label}</option>
-					{/each}
-				</select>
-				<p class="mt-0.5 text-xs opacity-40">Number of Backlog applications to process per tick.</p>
 			</label>
 		</div>
 	</div>

@@ -99,18 +99,6 @@ export const PUT: RequestHandler = async ({ request }) => {
 		}
 	}
 
-	// ── auto_apply_batch_size ────────────────────────────────────
-	if ('autoApplyBatchSize' in body) {
-		const val = body.autoApplyBatchSize;
-		const num = typeof val === 'number' ? val : typeof val === 'string' ? parseInt(val, 10) : NaN;
-		if (!Number.isFinite(num) || num < 1 || num > 10) {
-			errors.push('"autoApplyBatchSize" must be a number between 1 and 10');
-		} else {
-			appSettingsService.autoApplyBatchSize = num;
-			updated.autoApplyBatchSize = num;
-		}
-	}
-
 	// ── email_sync_cron ──────────────────────────────────────────
 	if ('emailSyncCron' in body) {
 		const val = body.emailSyncCron;
