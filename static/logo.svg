@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Left Pillar and Crossbar (Forms the left half and bridge of the 'H') -->
+  <!-- Designed with a precise right-pointing cut to nestle into the chevron -->
+  <path
+    d="M 88 90
+       L 152 90
+       L 152 186
+       L 320 186
+       L 344 218
+       L 320 250
+       L 152 250
+       L 152 346
+       L 88 346 Z"
+    fill="#0F172A"
+  />
+
+  <!-- The "Automation" Chevron (Forms the right half of the 'H') -->
+  <!-- Features a precisely calculated 16px gap between the crossbar to simulate speed and modularity -->
+  <path
+    d="M 264 90
+       L 328 90
+       L 424 218
+       L 328 346
+       L 264 346
+       L 360 218 Z"
+    fill="#0EA5E9"
+  />
+
+  <!-- Logotype / Branding -->
+  <text
+    x="256"
+    y="422"
+    font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    font-size="52"
+    font-weight="800"
+    text-anchor="middle"
+    letter-spacing="-1.5"
+  >
+    <tspan fill="#0F172A">Hunt</tspan><tspan fill="#0EA5E9">OS</tspan>
+  </text>
+</svg>
