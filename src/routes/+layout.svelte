@@ -1,6 +1,5 @@
 <script lang="ts">
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/stores';
 	import { AppBar, Navigation } from '@skeletonlabs/skeleton-svelte';
 	import {
@@ -8,7 +7,6 @@
 		UserIcon,
 		SettingsIcon,
 		ScrollTextIcon,
-		BriefcaseIcon,
 		PanelLeftCloseIcon,
 		PanelLeftOpenIcon,
 		FileTextIcon
@@ -36,8 +34,6 @@
 	}
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
-
 <div class="grid h-dvh grid-cols-[auto_1fr] grid-rows-[auto_1fr] overflow-hidden">
 	<!-- App Bar -->
 	<header class="col-span-2 border-b border-surface-200-800 bg-surface-50-950">
@@ -59,8 +55,8 @@
 				</AppBar.Lead>
 				<AppBar.Headline>
 					<a href="/applications" class="flex items-center gap-2">
-						<BriefcaseIcon class="size-6 text-primary-500" />
-						<span class="text-xl font-bold">AutoApply</span>
+						<img src="/favicon-32x32.png" alt="HuntOS" class="size-6" />
+						<span class="text-xl font-bold">HuntOS</span>
 					</a>
 				</AppBar.Headline>
 				<AppBar.Trail>
