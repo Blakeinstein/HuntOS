@@ -172,7 +172,7 @@
 	// LOGS TAB
 	// ─────────────────────────────────────────────────────────────────────────
 
-	type LogSource = 'dev' | 'studio' | 'chrome';
+	type LogSource = 'dev' | 'chrome';
 
 	let logSource = $state<LogSource>('dev');
 	let logLines = $state<string[]>([]);
@@ -180,15 +180,27 @@
 	let logConnected = $state(false);
 	let logEventSource = $state<EventSource | null>(null);
 	let logContainer = $state<HTMLElement | null>(null);
+	let logRetryTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+	let logRetryCount = $state(0);
 
 	function connectLogs(source: LogSource) {
+		// Cancel any pending retry
+		if (logRetryTimer) {
+			clearTimeout(logRetryTimer);
+			logRetryTimer = null;
+		}
 		if (logEventSource) {
 			logEventSource.close();
 			logEventSource = null;
 		}
 		logLines = [];
 		logConnected = false;
+		logRetryCount = 0;
 
+		openEventSource(source);
+	}
+
+	function openEventSource(source: LogSource) {
 		const es = new EventSource(`/api/admin/logs?source=${source}`);
 		logEventSource = es;
 
@@ -210,10 +222,21 @@
 
 		es.onopen = () => {
 			logConnected = true;
+			logRetryCount = 0;
 		};
 
 		es.onerror = () => {
 			logConnected = false;
+			es.close();
+			logEventSource = null;
+
+			// Exponential backoff: 1s, 2s, 4s, 8s, capped at 16s
+			const delay = Math.min(1000 * Math.pow(2, logRetryCount), 16_000);
+			logRetryCount += 1;
+			logRetryTimer = setTimeout(() => {
+				logRetryTimer = null;
+				openEventSource(source);
+			}, delay);
 		};
 	}
 
@@ -345,12 +368,13 @@
 	});
 
 	$effect(() => {
-		if (activeTab === 'logs' && !logEventSource) {
+		if (activeTab === 'logs' && !logEventSource && !logRetryTimer) {
 			connectLogs(logSource);
 		}
 	});
 
 	onDestroy(() => {
+		if (logRetryTimer) clearTimeout(logRetryTimer);
 		logEventSource?.close();
 	});
 
@@ -389,7 +413,17 @@
 			<h1 class="h3 font-bold">Admin</h1>
 			<p class="text-sm opacity-60">Inspect and manage local data, logs, and files.</p>
 		</div>
-		<span class="badge preset-filled-error-500 text-xs">Internal Use Only</span>
+		<div class="flex items-center gap-2">
+			<a
+				href="http://localhost:3000/"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="btn preset-tonal btn-sm text-xs"
+			>
+				Open Mastra Studio ↗
+			</a>
+			<span class="badge preset-filled-error-500 text-xs">Internal Use Only</span>
+		</div>
 	</div>
 
 	<!-- Tabs -->
@@ -672,7 +706,7 @@
 			<div class="flex flex-wrap items-center gap-3">
 				<!-- Source selector -->
 				<div class="flex gap-1 rounded-lg border border-surface-200-800 p-1">
-					{#each [{ id: 'dev' as LogSource, label: 'Dev Server' }, { id: 'studio' as LogSource, label: 'Mastra Studio' }, { id: 'chrome' as LogSource, label: 'Chrome' }] as src (src.id)}
+					{#each [{ id: 'dev' as LogSource, label: 'Dev Server' }, { id: 'chrome' as LogSource, label: 'Chrome' }] as src (src.id)}
 						<button
 							type="button"
 							class="rounded px-3 py-1 text-xs font-medium transition-colors
@@ -689,9 +723,19 @@
 					<span
 						class="size-2 rounded-full {logConnected
 							? 'animate-pulse bg-success-500'
-							: 'bg-error-500'}"
+							: logRetryTimer
+								? 'animate-pulse bg-warning-500'
+								: 'bg-error-500'}"
 					></span>
-					<span class="opacity-60">{logConnected ? 'Connected' : 'Disconnected'}</span>
+					<span class="opacity-60">
+						{#if logConnected}
+							Connected
+						{:else if logRetryTimer}
+							Reconnecting…
+						{:else}
+							Disconnected
+						{/if}
+					</span>
 				</div>
 
 				<div class="ml-auto flex gap-2">
@@ -699,6 +743,16 @@
 						<input type="checkbox" class="checkbox size-3.5" bind:checked={logAutoScroll} />
 						Auto-scroll
 					</label>
+					{#if !logConnected}
+						<button
+							type="button"
+							class="btn preset-tonal btn-sm"
+							onclick={() => connectLogs(logSource)}
+						>
+							<RefreshCwIcon class="size-3.5 {logRetryTimer ? 'animate-spin' : ''}" />
+							Reconnect
+						</button>
+					{/if}
 					<button type="button" class="btn preset-tonal btn-sm" onclick={clearLogs}>
 						<XIcon class="size-3.5" />
 						Clear

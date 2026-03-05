@@ -2,6 +2,7 @@
 # scripts/chrome-cdp.sh
 # Starts Chrome with remote debugging, connects agent-browser to the CDP session,
 # then keeps Chrome running (as the foreground process) so run-pty can manage it.
+# Output is piped through tee to data/logs/chrome.log for the admin panel.
 #
 # run-pty shows this tile as "Chrome CDP". Ctrl+C in the dashboard kills Chrome.
 
@@ -9,11 +10,14 @@ set -uo pipefail
 
 CDP_PORT=9222
 CHROME_DATA_DIR="./data/chrome"
+LOG_FILE="./data/logs/chrome.log"
+
+mkdir -p data/logs
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-log()  { echo "[chrome-cdp] $*"; }
-err()  { echo "[chrome-cdp] ERROR: $*" >&2; }
+log()  { echo "[chrome-cdp] $*" | tee -a "$LOG_FILE"; }
+err()  { echo "[chrome-cdp] ERROR: $*" | tee -a "$LOG_FILE" >&2; }
 
 evict_port() {
   local holders
@@ -60,7 +64,7 @@ google-chrome-stable \
   --no-first-run \
   --no-default-browser-check \
   --disable-default-apps \
-  &
+  >> "$LOG_FILE" 2>&1 &
 CHROME_PID=$!
 
 # Kill Chrome if this script exits for any reason before the wait at the bottom.
@@ -80,7 +84,8 @@ fi
 log "CDP URL: ${CDP_URL}"
 
 log "Connecting agent-browser…"
-if ! bun run ab connect "$CDP_URL"; then
+bun run ab connect "$CDP_URL" 2>&1 | tee -a "$LOG_FILE"
+if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
   err "agent-browser connect failed. Is 'agent-browser' installed?"
   exit 1
 fi

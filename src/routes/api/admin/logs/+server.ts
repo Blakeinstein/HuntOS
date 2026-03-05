@@ -1,15 +1,14 @@
 // src/routes/api/admin/logs/+server.ts
 // SSE endpoint that streams server log files to the admin panel in real time.
-// Supports tailing data/dev.log, data/studio.log, or data/chrome.log.
+// Supports tailing data/logs/dev.log or data/logs/chrome.log.
 
 import type { RequestHandler } from './$types';
 import { existsSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { resolve } from 'path';
 
 const LOG_FILES: Record<string, string> = {
-	dev: resolve('data/dev.log'),
-	studio: resolve('data/studio.log'),
-	chrome: resolve('data/chrome.log')
+	dev: resolve('data/logs/dev.log'),
+	chrome: resolve('data/logs/chrome.log')
 };
 
 const VALID_SOURCES = new Set(Object.keys(LOG_FILES));
