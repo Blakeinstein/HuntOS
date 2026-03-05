@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { invalidate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { Switch } from '@skeletonlabs/skeleton-svelte';
 	import {
@@ -21,10 +20,13 @@
 
 	let { data } = $props();
 
-	// ── Reactive references to server data ──────────────────────────
+	// ── Server data lifted into $state so mutations are always reactive ──────
+	// $state() here intentionally captures the initial prop value as a snapshot.
+	// We update these manually after a successful save instead of re-deriving
+	// from `data`, which is a prop and doesn't trigger reactivity on sub-mutations.
 
-	let serverSettings = $derived(data.settings);
-	let serverScheduler = $derived(data.scheduler);
+	let serverSettings = $state.raw(data.settings);
+	let serverScheduler = $state.raw(data.scheduler);
 
 	// ── Form state (local overrides — null means "use server value") ─
 
@@ -52,12 +54,12 @@
 
 	// Track unsaved changes
 	let hasChanges = $derived(
-		autoApplyEnabled !== serverSettings.autoApplyEnabled ||
-			autoApplyCron !== serverSettings.autoApplyCron ||
-			autoApplyBatchSize !== String(serverSettings.autoApplyBatchSize) ||
-			scraperEnabled !== serverSettings.scraperEnabled ||
-			auditCleanupEnabled !== serverSettings.auditCleanupEnabled ||
-			auditCleanupCron !== serverSettings.auditCleanupCron
+		_autoApplyEnabled !== null ||
+			_autoApplyCron !== null ||
+			_autoApplyBatchSize !== null ||
+			_scraperEnabled !== null ||
+			_auditCleanupEnabled !== null ||
+			_auditCleanupCron !== null
 	);
 
 	/** Clear all local overrides (resets form to server state). */
@@ -136,18 +138,15 @@
 						: 'Settings saved'
 			};
 
-			// Refresh data
-			await invalidate('app:automation-settings');
-
-			// Update the source of truth so hasChanges recalculates
+			// Update $state so derived values and hasChanges recalculate immediately
 			if (result.settings) {
-				data.settings = result.settings;
+				serverSettings = result.settings;
 			}
 
-			// Clear local overrides so form picks up the saved server values
+			// Clear local overrides — form now reads the fresh serverSettings
 			clearOverrides();
 
-			// Refresh scheduler status
+			// Refresh scheduler job statuses
 			await refreshSchedulerStatus();
 		} catch (err) {
 			saveResult = {
@@ -172,7 +171,7 @@
 			const res = await fetch('/api/settings/automation');
 			const result = await res.json();
 			if (result.scheduler) {
-				data.scheduler = result.scheduler;
+				serverScheduler = result.scheduler;
 			}
 		} catch {
 			// Silently ignore — the status will be stale but that's fine
