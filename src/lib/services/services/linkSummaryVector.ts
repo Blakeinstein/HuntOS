@@ -166,10 +166,10 @@ export class LinkSummaryVectorService {
 			ORDER BY v.distance
 		`);
 
-		const vecRows = stmt.all(
-			new Float32Array(queryEmbedding).buffer as ArrayBuffer,
-			topK
-		) as Array<{ link_summary_id: number; distance: number }>;
+		const vecRows = stmt.all(Buffer.from(new Float32Array(queryEmbedding).buffer), topK) as Array<{
+			link_summary_id: number;
+			distance: number;
+		}>;
 
 		if (vecRows.length === 0) return [];
 
@@ -243,9 +243,7 @@ export class LinkSummaryVectorService {
 	 * Return the count of currently indexed link summary vectors.
 	 */
 	getIndexedCount(): number {
-		const row = this.db.get<{ count: number }>(
-			`SELECT COUNT(*) AS count FROM link_summary_vec`
-		);
+		const row = this.db.get<{ count: number }>(`SELECT COUNT(*) AS count FROM link_summary_vec`);
 		return row?.count ?? 0;
 	}
 
@@ -291,7 +289,7 @@ export class LinkSummaryVectorService {
 
 		const upsert = raw.transaction((id: number, vec: number[]) => {
 			del.run(id);
-			ins.run(id, new Float32Array(vec).buffer as ArrayBuffer);
+			ins.run(id, Buffer.from(new Float32Array(vec).buffer));
 		});
 
 		upsert(linkSummaryId, embedding);
