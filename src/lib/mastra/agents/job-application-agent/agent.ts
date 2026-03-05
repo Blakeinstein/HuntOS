@@ -66,7 +66,8 @@ export function createJobApplicationAgent(toolLogging?: ToolLoggingOptions) {
 			'Resume File Path': `\`${requestContext.get('resume-file-path') as JobApplicationRequestContext['resume-file-path']}\``,
 			'Site-Specific Instructions': requestContext.get(
 				'site-instructions'
-			) as JobApplicationRequestContext['site-instructions']
+			) as JobApplicationRequestContext['site-instructions'],
+			'Screenshot Directory': `\`${requestContext.get('screenshot-dir') as JobApplicationRequestContext['screenshot-dir']}\``
 		}),
 		model: env.JOB_APPLICATION_AGENT_MODEL ?? 'openrouter/qwen/qwen3.5-flash-02-23',
 		tools: {

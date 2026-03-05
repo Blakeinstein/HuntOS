@@ -1300,6 +1300,13 @@ export class ApplyPipelineExecutor {
 				this.log(runId, step, 'No resume PDF available — skipping upload', 'progress');
 			}
 
+			// ── Set up per-run screenshot directory ──────────────────
+			// Must be built before requestContext so the absolute path can be
+			// injected into the context and used by the agent's own browser_screenshot calls.
+			const screenshotRunDir = buildRunScreenshotDir(runId, application.company, application.title);
+			ensureRunScreenshotDir(screenshotRunDir);
+			this.log(runId, step, `Screenshot dir: ${screenshotRunDir}`, 'progress');
+
 			const requestContext = new RequestContext<JobApplicationRequestContext>();
 			requestContext.set('application-url', url);
 			requestContext.set('user-profile', userProfileJson);
@@ -1308,13 +1315,9 @@ export class ApplyPipelineExecutor {
 			requestContext.set('resume-file-path', resumeFilePath);
 			requestContext.set('detected-site', site);
 			requestContext.set('site-instructions', siteInstructions);
+			requestContext.set('screenshot-dir', screenshotRunDir);
 
 			this.checkCancelled(runId);
-
-			// ── Set up per-run screenshot directory ──────────────────
-			const screenshotRunDir = buildRunScreenshotDir(runId, application.company, application.title);
-			ensureRunScreenshotDir(screenshotRunDir);
-			this.log(runId, step, `Screenshot dir: ${screenshotRunDir}`, 'progress');
 
 			// ── Run the agent ────────────────────────────────────────
 			this.log(runId, step, `Launching application agent (${site}) on: ${url}`, 'progress');

@@ -186,7 +186,7 @@ Before submitting, scroll to the very bottom of the form:
    - `browser_wait_text { text: "Thank you" }` or `browser_wait_text { text: "Application submitted" }`
    - Or `browser_wait_url { urlPattern: "**/confirmation" }`
    - If neither appears within a reasonable time, call `browser_snapshot` to check the page state.
-6. Take a `browser_screenshot { path: "greenhouse-application-result.png" }` of the confirmation state.
+6. Take a `browser_screenshot { path: "<Screenshot Directory>/greenhouse-application-result.png" }` of the confirmation state.
 
 ### Handling Submission Failures
 

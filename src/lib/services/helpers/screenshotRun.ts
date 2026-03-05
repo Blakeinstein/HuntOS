@@ -3,10 +3,9 @@
 // Per-application-run screenshot capture helper.
 //
 // Creates a dedicated subfolder under data/logs/screenshots for each pipeline run
-// and captures a full-page annotated screenshot (numbered element labels) after
-// every agent iteration. Screenshots are taken *outside* the agent — directly
-// from pipeline code via browserExec — so they are always captured even if the
-// agent itself fails or gets stuck.
+// and captures a full-page screenshot after every agent iteration. Screenshots are
+// taken *outside* the agent — directly from pipeline code via browserExec — so
+// they are always captured even if the agent itself fails or gets stuck.
 //
 // Directory structure:
 //   data/logs/screenshots/
@@ -18,6 +17,10 @@
 //       final.png
 //
 // Filenames are zero-padded so they sort correctly in file explorers.
+//
+// IMPORTANT: all paths passed to browserExec must be absolute (path.resolve()).
+// agent-browser resolves relative paths against its own cwd, which differs from
+// the SvelteKit server cwd, so bare relative paths land in the wrong place.
 
 import fs from 'fs';
 import path from 'path';
@@ -50,7 +53,8 @@ function sanitise(value: string, maxLen = 40): string {
 export function buildRunScreenshotDir(runId: number, company: string, title: string): string {
 	const companySlug = sanitise(company);
 	const titleSlug = sanitise(title);
-	return path.join(SCREENSHOTS_ROOT, `${companySlug}-${runId}`, titleSlug);
+	// Always return an absolute path so agent-browser and fs calls agree on location.
+	return path.resolve(SCREENSHOTS_ROOT, `${companySlug}-${runId}`, titleSlug);
 }
 
 /**
@@ -65,24 +69,28 @@ export function ensureRunScreenshotDir(runDir: string): void {
 }
 
 /**
- * Capture a full-page annotated screenshot and save it to `filePath`.
+ * Capture a full-page screenshot and save it to `filePath`.
  *
- * Uses `agent-browser screenshot <path> --full --annotate` so the saved image
- * includes numbered element labels — ideal for debugging what the agent saw at
- * the end of each iteration.
+ * Uses `agent-browser screenshot <path> --full`. The path is resolved to an
+ * absolute path before being passed to the CLI so it lands in the correct
+ * location regardless of what cwd agent-browser happens to use.
  *
  * Returns `true` on success, `false` if the browser command fails (non-fatal —
  * a screenshot failure should never abort the pipeline).
  */
 export async function captureAnnotatedScreenshot(filePath: string): Promise<boolean> {
 	try {
+		// Always use an absolute path — agent-browser resolves relative paths
+		// against its own cwd, not the SvelteKit server cwd.
+		const absolutePath = path.resolve(filePath);
+
 		// Ensure parent directory exists (defensive; run dir should already be created).
-		const dir = path.dirname(filePath);
+		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
 
-		const result = await browserExec(['screenshot', filePath, '--full', '--annotate'], {
+		const result = await browserExec(['screenshot', '--full', absolutePath], {
 			timeout: 30_000
 		});
 

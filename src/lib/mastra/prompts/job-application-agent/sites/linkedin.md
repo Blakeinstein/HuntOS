@@ -220,7 +220,7 @@ The review step shows a summary of all entered information. Here:
 2. After clicking, wait for confirmation:
    - `browser_wait_text { text: "Application submitted" }` or `browser_wait_text { text: "Your application was sent" }`
    - If no confirmation text appears, call `browser_snapshot` to check the page state.
-3. Take a `browser_screenshot { path: "linkedin-application-result.png" }` of the confirmation state.
+3. Take a `browser_screenshot { path: "<Screenshot Directory>/linkedin-application-result.png" }` of the confirmation state.
 4. If the submission fails (validation errors reappear, error toast, etc.), record the errors and return `success: false`.
 
 ### Handling External Application (If Applicable)

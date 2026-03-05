@@ -165,6 +165,8 @@ export type JobApplicationRequestContext = {
 	'detected-site': string;
 	/** Site-specific supplemental instructions loaded from prompts/job-application-agent/sites/ */
 	'site-instructions': string;
+	/** Absolute path to the per-run screenshot directory for this application attempt */
+	'screenshot-dir': string;
 };
 
 /**
@@ -177,5 +179,6 @@ export const jobApplicationRequestContextSchema = z.object({
 	'resume-data': z.string(),
 	'resume-file-path': z.string(),
 	'detected-site': z.string(),
-	'site-instructions': z.string()
+	'site-instructions': z.string(),
+	'screenshot-dir': z.string()
 });
