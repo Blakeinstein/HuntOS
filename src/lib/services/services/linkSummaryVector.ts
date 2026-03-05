@@ -18,10 +18,10 @@ import { resolveEmbeddingModel } from '$lib/mastra/providers';
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Must match the dimension declared in the link_summary_vec CREATE VIRTUAL TABLE. */
-const EMBEDDING_DIMENSIONS = 384;
+const EMBEDDING_DIMENSIONS = 768;
 
 function getEmbeddingModel(): string {
-	return env.EMBEDDING_MODEL ?? 'openrouter/openai/text-embedding-3-small';
+	return env.EMBEDDING_MODEL ?? 'lmstudio/text-embedding-nomic-embed-text-v1.5';
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -251,26 +251,14 @@ export class LinkSummaryVectorService {
 
 	private async embedSingle(text: string): Promise<number[]> {
 		const model = resolveEmbeddingModel(getEmbeddingModel());
-		const { embedding } = await embed({
-			model,
-			value: text,
-			providerOptions: {
-				openai: { dimensions: EMBEDDING_DIMENSIONS }
-			}
-		});
+		const { embedding } = await embed({ model, value: text });
 		return embedding;
 	}
 
 	private async embedBatch(texts: string[]): Promise<number[][]> {
 		if (texts.length === 0) return [];
 		const model = resolveEmbeddingModel(getEmbeddingModel());
-		const { embeddings } = await embedMany({
-			model,
-			values: texts,
-			providerOptions: {
-				openai: { dimensions: EMBEDDING_DIMENSIONS }
-			}
-		});
+		const { embeddings } = await embedMany({ model, values: texts });
 		return embeddings;
 	}
 

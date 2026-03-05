@@ -351,13 +351,30 @@ export class Database {
 		const docVecTableExists = this.get<{ name: string }>(
 			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'document_chunks_vec'`
 		);
-		if (!docVecTableExists) {
-			// 384 dimensions — matches a compact embedding model (e.g. text-embedding-3-small @ 384d)
+		// Recreate document_chunks_vec if it exists with the wrong dimensions (e.g. old 384d table).
+		// vec0 virtual tables store dimension count in their schema string — we detect a stale table
+		// by inspecting sqlite_master and drop/recreate if it doesn't match the current 768d layout.
+		if (docVecTableExists) {
+			const docVecSchema = this.get<{ sql: string }>(
+				`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'document_chunks_vec'`
+			);
+			if (docVecSchema && !docVecSchema.sql.includes('float[768]')) {
+				// Stale dimensions — nuke it. All chunk embeddings will be re-indexed on next document upload.
+				this.db.exec(`DROP TABLE document_chunks_vec`);
+				this.db.exec(`
+          CREATE VIRTUAL TABLE document_chunks_vec USING vec0(
+            chunk_id INTEGER PRIMARY KEY,
+            embedding float[768]
+          );
+        `);
+			}
+		} else {
+			// 768 dimensions — matches nomic-embed-text-v1.5 (LMStudio default) and other 768d models.
 			// The chunk_id column links back to document_chunks.id for metadata lookups.
 			this.db.exec(`
         CREATE VIRTUAL TABLE document_chunks_vec USING vec0(
           chunk_id INTEGER PRIMARY KEY,
-          embedding float[384]
+          embedding float[768]
         );
       `);
 		}
@@ -368,11 +385,25 @@ export class Database {
 		const linkSummaryVecExists = this.get<{ name: string }>(
 			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'link_summary_vec'`
 		);
-		if (!linkSummaryVecExists) {
+		if (linkSummaryVecExists) {
+			const linkVecSchema = this.get<{ sql: string }>(
+				`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'link_summary_vec'`
+			);
+			if (linkVecSchema && !linkVecSchema.sql.includes('float[768]')) {
+				// Stale dimensions — drop and recreate. Embeddings will be inserted fresh on next scrape.
+				this.db.exec(`DROP TABLE link_summary_vec`);
+				this.db.exec(`
+          CREATE VIRTUAL TABLE link_summary_vec USING vec0(
+            link_summary_id INTEGER PRIMARY KEY,
+            embedding float[768]
+          );
+        `);
+			}
+		} else {
 			this.db.exec(`
         CREATE VIRTUAL TABLE link_summary_vec USING vec0(
           link_summary_id INTEGER PRIMARY KEY,
-          embedding float[384]
+          embedding float[768]
         );
       `);
 		}

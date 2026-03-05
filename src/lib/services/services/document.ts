@@ -50,12 +50,10 @@ export type DocumentContentType = 'text' | 'pdf' | 'html' | 'markdown';
 
 // Embedding model configuration
 // Format: <provider>/<model-path> — resolved via the provider registry.
-// 384 dimensions — must match the vec0 table definition in database.ts.
-// We pass dimensions via the AI SDK `providerOptions` so the upstream
-// provider truncates the vector server-side.
-const EMBEDDING_DIMENSIONS = 384;
+// 768 dimensions — must match the vec0 table definition in database.ts.
+// nomic-embed-text-v1.5 (LMStudio default) natively produces 768d vectors.
 function getEmbeddingModel(): string {
-	return env.EMBEDDING_MODEL ?? 'openrouter/openai/text-embedding-3-small';
+	return env.EMBEDDING_MODEL ?? 'lmstudio/text-embedding-nomic-embed-text-v1.5';
 }
 
 // Chunking defaults
@@ -322,13 +320,7 @@ export class DocumentService {
 
 		const model = resolveEmbeddingModel(getEmbeddingModel());
 
-		const { embeddings } = await embedMany({
-			model,
-			values: texts,
-			providerOptions: {
-				openai: { dimensions: EMBEDDING_DIMENSIONS }
-			}
-		});
+		const { embeddings } = await embedMany({ model, values: texts });
 
 		return embeddings;
 	}
@@ -339,13 +331,7 @@ export class DocumentService {
 	private async embedSingle(text: string): Promise<number[]> {
 		const model = resolveEmbeddingModel(getEmbeddingModel());
 
-		const { embedding } = await embed({
-			model,
-			value: text,
-			providerOptions: {
-				openai: { dimensions: EMBEDDING_DIMENSIONS }
-			}
-		});
+		const { embedding } = await embed({ model, value: text });
 
 		return embedding;
 	}
