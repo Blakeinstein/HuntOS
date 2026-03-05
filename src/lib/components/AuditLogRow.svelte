@@ -12,9 +12,14 @@
 		ExternalLinkIcon,
 		ImageIcon,
 		Loader2Icon,
-		ChevronLeftIcon
+		ChevronLeftIcon,
+		RadioIcon
 	} from '@lucide/svelte';
 	import type { AuditLogEntry } from '$lib/services/types';
+	import LiveScrapePanel from '$lib/components/LiveScrapePanel.svelte';
+	import { activeScrapes } from '$lib/stores/activeScrapes';
+	import { onScrapeFinish } from '$lib/stores/activeScrapes';
+	import { onDestroy } from 'svelte';
 
 	interface Props {
 		entry: AuditLogEntry;
@@ -23,6 +28,15 @@
 	let { entry }: Props = $props();
 
 	let expanded = $state(false);
+	let streamOpen = $state(false);
+
+	// Auto-close the stream panel when the scrape finishes
+	const unsubFinish = onScrapeFinish((boardId) => {
+		if (boardId === scrapeBoardId) {
+			streamOpen = false;
+		}
+	});
+	onDestroy(() => unsubFinish());
 
 	const statusConfig: Record<string, { icon: typeof CheckCircleIcon; color: string; bg: string }> =
 		{
@@ -70,6 +84,28 @@
 	/** Extract applicationId from meta for rendering a backlink. */
 	const linkedApplicationId = $derived(
 		entry.meta && typeof entry.meta.applicationId === 'number' ? entry.meta.applicationId : null
+	);
+
+	/** Board ID extracted from scrape meta, used to show the live stream panel. */
+	const scrapeBoardId = $derived(
+		entry.category === 'scrape' && entry.meta && typeof entry.meta.jobBoardId === 'number'
+			? (entry.meta.jobBoardId as number)
+			: null
+	);
+
+	const scrapeBoardName = $derived(
+		entry.meta && typeof entry.meta.jobBoardName === 'string'
+			? (entry.meta.jobBoardName as string)
+			: 'Job Board'
+	);
+
+	/** Whether this scrape board currently has an active (non-terminal) stream. */
+	const hasActiveStream = $derived(
+		scrapeBoardId != null &&
+			(() => {
+				const s = activeScrapes.get(scrapeBoardId);
+				return s != null && (s.state === 'connecting' || s.state === 'streaming');
+			})()
 	);
 
 	/** Meta entries excluding keys rendered as dedicated UI elements. */
@@ -156,14 +192,23 @@
 
 <div class="border-b border-surface-200-800 transition-colors hover:bg-surface-100-900/50">
 	<!-- Main row -->
-	<button
-		type="button"
-		class="flex w-full items-center gap-3 px-4 py-3 text-left"
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<div
+		class="flex w-full items-center gap-3 px-4 py-3 text-left {hasExpandableContent
+			? 'cursor-pointer'
+			: ''}"
+		role={hasExpandableContent ? 'button' : undefined}
+		tabindex={hasExpandableContent ? 0 : undefined}
+		aria-expanded={hasExpandableContent ? expanded : undefined}
 		onclick={() => {
 			if (hasExpandableContent) expanded = !expanded;
 		}}
-		aria-expanded={expanded}
-		disabled={!hasExpandableContent}
+		onkeydown={(e) => {
+			if (hasExpandableContent && (e.key === 'Enter' || e.key === ' ')) {
+				e.preventDefault();
+				expanded = !expanded;
+			}
+		}}
 	>
 		<!-- Expand chevron -->
 		<span class="flex w-4 shrink-0 items-center justify-center">
@@ -209,6 +254,22 @@
 			</div>
 		</div>
 
+		<!-- Stream toggle — only visible while scrape is actively running -->
+		{#if hasActiveStream}
+			<button
+				type="button"
+				class="btn shrink-0 gap-1 preset-filled-primary-500 btn-sm text-[10px]"
+				onclick={(e) => {
+					e.stopPropagation();
+					streamOpen = !streamOpen;
+				}}
+				title={streamOpen ? 'Hide live stream' : 'View live stream'}
+			>
+				<RadioIcon class="size-3 animate-pulse" />
+				{streamOpen ? 'Hide Stream' : 'Live Stream'}
+			</button>
+		{/if}
+
 		<!-- Duration -->
 		{#if formattedDuration}
 			<span class="flex shrink-0 items-center gap-1 text-xs opacity-50" title="Duration">
@@ -221,7 +282,14 @@
 		<span class="shrink-0 text-xs opacity-40">
 			{formattedDate}
 		</span>
-	</button>
+	</div>
+
+	<!-- Inline stream panel — read-only view of the live running scrape -->
+	{#if streamOpen && hasActiveStream && scrapeBoardId != null}
+		<div class="border-t border-surface-200-800 bg-surface-50-950/50 px-4 py-3 pl-14">
+			<LiveScrapePanel boardId={scrapeBoardId} boardName={scrapeBoardName} readonly />
+		</div>
+	{/if}
 
 	<!-- Expanded detail panel -->
 	{#if expanded && hasExpandableContent}

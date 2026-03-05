@@ -1,6 +1,5 @@
 // src/routes/audit/+page.server.ts
-// Server load function for the Audit page — queries audit logs with URL-based filters
-// Also loads job boards for the live scrape panel board picker.
+// Server load function for the Audit page — queries audit logs with URL-based filters.
 
 import type { PageServerLoad } from './$types';
 import { createServices } from '$lib/services';
@@ -57,9 +56,6 @@ export const load: PageServerLoad = async ({ url }) => {
 	const categories = services.auditLogService.getCategories();
 	const agentIds = services.auditLogService.getAgentIds();
 
-	// Load enabled job boards for the live scrape panel picker
-	const jobBoards = (await services.jobBoardService.getJobBoards()).filter((b) => b.is_enabled);
-
 	return {
 		auditLogs: result.logs,
 		total: result.total,
@@ -77,11 +73,6 @@ export const load: PageServerLoad = async ({ url }) => {
 			categories,
 			agentIds,
 			statuses: VALID_STATUSES
-		},
-		jobBoards: jobBoards.map((b) => ({
-			id: b.id,
-			name: b.name,
-			base_url: b.base_url
-		}))
+		}
 	};
 };

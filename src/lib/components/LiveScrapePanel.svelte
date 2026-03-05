@@ -37,9 +37,14 @@
 		boardName?: string;
 		/** Called when the stream finishes (success or error). */
 		onfinish?: (result: { success: boolean; totalFound: number; newApplications: number }) => void;
+		/**
+		 * When true, hides all start/stop/retry/dismiss controls.
+		 * Use this when embedding the panel as a read-only live log viewer.
+		 */
+		readonly?: boolean;
 	}
 
-	let { boardId, boardName = 'Job Board', onfinish }: Props = $props();
+	let { boardId, boardName = 'Job Board', onfinish, readonly = false }: Props = $props();
 
 	// Reactive binding to the global active scrape for this board
 	const scrape = $derived(activeScrapes.get(boardId) ?? null);
@@ -214,16 +219,18 @@
 					<LoaderCircleIcon class="size-3 animate-spin" />
 					{streamState === 'connecting' ? 'Connecting…' : 'Streaming…'}
 				</span>
-				<button
-					type="button"
-					class="btn gap-1 preset-tonal-error btn-sm text-[10px]"
-					onclick={stopStream}
-					title="Stop stream"
-				>
-					<XIcon class="size-3" />
-					Stop
-				</button>
-			{:else if streamState === 'done' || streamState === 'error'}
+				{#if !readonly}
+					<button
+						type="button"
+						class="btn gap-1 preset-tonal-error btn-sm text-[10px]"
+						onclick={stopStream}
+						title="Stop stream"
+					>
+						<XIcon class="size-3" />
+						Stop
+					</button>
+				{/if}
+			{:else if !readonly && (streamState === 'done' || streamState === 'error')}
 				<button type="button" class="btn gap-1 preset-tonal btn-sm text-[10px]" onclick={dismiss}>
 					<XIcon class="size-3" />
 					Dismiss
@@ -236,7 +243,7 @@
 					<RadioIcon class="size-3" />
 					Retry
 				</button>
-			{:else}
+			{:else if !readonly && streamState === 'idle'}
 				<button type="button" class="btn gap-1.5 preset-tonal-primary btn-sm" onclick={startStream}>
 					<RadioIcon class="size-3.5" />
 					<span>Start Stream</span>

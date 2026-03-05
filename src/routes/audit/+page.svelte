@@ -8,12 +8,10 @@
 		ChevronLeftIcon,
 		ChevronRightIcon,
 		InboxIcon,
-		RadioIcon,
 		LoaderCircleIcon
 	} from '@lucide/svelte';
 	import AuditFilters from '$lib/components/AuditFilters.svelte';
 	import AuditLogRow from '$lib/components/AuditLogRow.svelte';
-	import LiveScrapePanel from '$lib/components/LiveScrapePanel.svelte';
 	import { activeScrapes, onScrapeFinish } from '$lib/stores/activeScrapes';
 	import { onDestroy } from 'svelte';
 
@@ -23,24 +21,11 @@
 	const total = $derived(data.total ?? 0);
 	const limit = $derived(data.limit ?? 50);
 	const offset = $derived(data.offset ?? 0);
-	const jobBoards: Array<{ id: number; name: string; base_url: string }> = $derived(
-		data.jobBoards ?? []
-	);
 
 	const currentPage = $derived(Math.floor(offset / limit) + 1);
 	const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
 	const hasPrev = $derived(offset > 0);
 	const hasNext = $derived(offset + limit < total);
-
-	let selectedBoardId = $state<number | null>(null);
-
-	const selectedBoard = $derived(
-		selectedBoardId != null
-			? jobBoards.find(
-					(b: { id: number; name: string; base_url: string }) => b.id === selectedBoardId
-				)
-			: null
-	);
 
 	// Derive active scrapes from the global store (includes scrapes started from job boards page)
 	const activeEntries = $derived(
@@ -50,14 +35,6 @@
 	);
 
 	const hasActiveScrapes = $derived(activeEntries.length > 0);
-
-	// When a scrape started from elsewhere selects a board, auto-select it in the panel
-	$effect(() => {
-		if (hasActiveScrapes && selectedBoardId == null) {
-			const [firstBoardId] = activeEntries[0];
-			selectedBoardId = firstBoardId;
-		}
-	});
 
 	// Listen for scrape finishes globally to auto-refresh the audit log list
 	const unsubFinish = onScrapeFinish(() => {
@@ -90,10 +67,6 @@
 		const base = resolve('/audit');
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic query string
 		goto(qs ? `${base}?${qs}` : base, { replaceState: true });
-	}
-
-	function handleScrapeFinish() {
-		refreshLogs();
 	}
 </script>
 
@@ -129,15 +102,12 @@
 	{#if hasActiveScrapes}
 		<div class="space-y-2">
 			{#each activeEntries as [boardId, scrape] (boardId)}
-				{@const board = jobBoards.find((b) => b.id === boardId)}
 				<div
 					class="flex items-center gap-3 rounded-lg border border-primary-500/30 bg-primary-500/5 px-4 py-2.5"
 				>
 					<LoaderCircleIcon class="size-4 shrink-0 animate-spin text-primary-500" />
 					<div class="min-w-0 flex-1">
-						<p class="text-xs font-medium">
-							Scraping {scrape.boardName}{board ? ` — ${board.base_url}` : ''}
-						</p>
+						<p class="text-xs font-medium">Scraping {scrape.boardName}</p>
 						{#if scrape.events.length > 0}
 							{@const latest = scrape.events.filter((e) => e.type !== 'text-delta').at(-1)}
 							{#if latest}
@@ -148,56 +118,8 @@
 					<span class="shrink-0 text-[10px] tabular-nums opacity-40">
 						{scrape.events.length} events
 					</span>
-					<button
-						type="button"
-						class="btn gap-1 preset-tonal-primary btn-sm text-[10px]"
-						onclick={() => (selectedBoardId = boardId)}
-					>
-						<RadioIcon class="size-3" />
-						View Stream
-					</button>
 				</div>
 			{/each}
-		</div>
-	{/if}
-
-	<!-- Live Scrape Panel -->
-	{#if jobBoards.length > 0}
-		<div class="card border border-surface-200-800 bg-surface-50-950 p-4">
-			<div class="flex flex-col gap-3">
-				<!-- Board picker -->
-				<div class="flex items-center gap-3">
-					<label for="board-picker" class="shrink-0 text-xs font-medium opacity-60">
-						Job Board
-					</label>
-					<select
-						id="board-picker"
-						class="select flex-1 rounded-md border border-surface-200-800 bg-surface-50-950 px-3 py-1.5 text-xs"
-						value={selectedBoardId ?? ''}
-						onchange={(e) => {
-							const val = (e.target as HTMLSelectElement).value;
-							selectedBoardId = val ? Number(val) : null;
-						}}
-					>
-						<option value="">Select a board to stream…</option>
-						{#each jobBoards as board (board.id)}
-							{@const isActive = activeEntries.some(([id]) => id === board.id)}
-							<option value={board.id}>
-								{board.name} — {board.base_url}{isActive ? ' (streaming)' : ''}
-							</option>
-						{/each}
-					</select>
-				</div>
-
-				<!-- Live panel -->
-				{#if selectedBoardId != null && selectedBoard}
-					<LiveScrapePanel
-						boardId={selectedBoardId}
-						boardName={selectedBoard.name}
-						onfinish={handleScrapeFinish}
-					/>
-				{/if}
-			</div>
 		</div>
 	{/if}
 
