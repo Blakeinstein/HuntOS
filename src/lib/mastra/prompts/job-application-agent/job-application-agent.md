@@ -168,6 +168,16 @@ You have access to the `agent-browser` toolset for interacting with web pages vi
 
 Check for these conditions and handle them:
 
+- **✅ Success / confirmation page:** If **the snapshot shows** any message indicating the application was already successfully submitted — such as:
+  - "Your application was successfully submitted"
+  - "Application submitted"
+  - "Thank you for applying"
+  - "We've received your application"
+  - "You have already applied"
+  - Any equivalent confirmation or success banner
+
+  **STOP immediately. Do NOT attempt to re-fill or re-submit the form.** Take a `browser_screenshot`, then return `success: true`, `submitted: true`, `end_reason: "success"` with an `end_reason_description` quoting the confirmation text verbatim.
+
 - **Login/authentication wall:** If **the snapshot shows** a sign-in form, login prompt, or the URL has redirected to an OAuth/login page, **do NOT immediately block**. Instead, follow the **SSO / Social Login Handling** steps below before giving up:
   1. Inspect the login page for SSO buttons (LinkedIn, Google, Microsoft, GitHub, Apple).
   2. If an SSO button is found, attempt to use it as described in the **SSO / Social Login Handling** section.
@@ -220,22 +230,24 @@ After clicking an SSO button, call `browser_wait_load { state: "networkidle" }`,
 **Check if a new tab opened instead of a redirect:**
 - Call `browser-tab-list`. If a new tab with the provider domain is present, `browser-tab-switch { index: N }` to it first.
 
+> ⚠️ **Golden rule for all SSO providers:** If clicking an SSO button results in a page that asks you to **log in again** (i.e. shows an email/password form, a "Sign in" heading, or any credential-entry UI), **STOP IMMEDIATELY** and return `blocked: true`. Do NOT attempt to enter credentials, do NOT try another SSO provider, do NOT retry. A login prompt appearing after clicking an SSO button means the browser session is not authenticated with that provider.
+
 **LinkedIn OAuth (`linkedin.com/oauth` or `linkedin.com/uas/login`):**
 - **Already authenticated → immediate redirect back:** `browser_get_url` shows the application site domain. ✅ Continue to SSO-3.
 - **Consent/authorization screen ("Allow [App] to access your LinkedIn account?"):** Call `browser_find_text { text: "Allow", action: "click" }`. Wait for redirect. ✅ Continue to SSO-3.
-- **LinkedIn login form (email + password fields visible):** STOP. Return `blocked: true` with `blocked_reason: "LinkedIn SSO requires LinkedIn login — browser session not authenticated with LinkedIn"`.
+- **LinkedIn login form shown (any email/password/sign-in UI visible):** STOP immediately. Return `blocked: true` with `blocked_reason: "LinkedIn SSO requires LinkedIn login — browser session not authenticated with LinkedIn"`. Do NOT try other SSO providers.
 
 **Google OAuth (`accounts.google.com`):**
 - **Account chooser (already signed in):** Find the user's email from User Profile in the list. Call `browser_find_text { text: "<email>", action: "click" }`. If not listed, click the first account. Wait for redirect. ✅ Continue to SSO-3.
 - **Consent screen:** Call `browser_find_text { text: "Allow", action: "click" }`. Wait for redirect. ✅ Continue to SSO-3.
-- **Google login form:** STOP. Return `blocked: true` with `blocked_reason: "Google SSO requires Google login — browser session not authenticated"`.
+- **Google login form shown:** STOP immediately. Return `blocked: true` with `blocked_reason: "Google SSO requires Google login — browser session not authenticated"`. Do NOT try other SSO providers.
 
 **Microsoft OAuth (`login.microsoftonline.com` / `login.live.com`):**
 - **Account picker:** Select the account. ✅ Continue.
 - **Consent screen:** Click "Accept". ✅ Continue.
-- **Login form:** STOP. Return `blocked: true` with `blocked_reason: "Microsoft SSO requires Microsoft login — browser session not authenticated"`.
+- **Login form shown:** STOP immediately. Return `blocked: true` with `blocked_reason: "Microsoft SSO requires Microsoft login — browser session not authenticated"`. Do NOT try other SSO providers.
 
-**Any other provider:** Same pattern — proceed through account pickers and consent screens; stop only if a credential form appears.
+**Any other provider:** Same pattern — proceed through account pickers and consent screens; stop immediately with `blocked: true` if a credential/login form appears after clicking the SSO button.
 
 #### SSO-3: Confirm Return to Application
 
@@ -246,7 +258,8 @@ After SSO completes:
 4. `browser_snapshot` — verify the application form or job posting is now visible.
 
 If the form is visible → **proceed directly to Step 3** (skip re-running Steps 1–2).
-If still on a login page → try the next available SSO provider (from SSO-1). After two failed SSO attempts → STOP with `blocked: true`.
+If still on a login page after SSO (and no credential form was shown) → try the next available SSO provider (from SSO-1). After two failed SSO attempts → STOP with `blocked: true`.
+If a **login/credential form appeared** after clicking any SSO button → STOP immediately with `blocked: true` per the golden rule above. Do NOT proceed to the next SSO provider.
 
 **Always record SSO attempts in the `notes` field** of the result (e.g. `"Used LinkedIn SSO — already authenticated, redirected back to Greenhouse form successfully"`).
 

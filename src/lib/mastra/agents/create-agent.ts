@@ -18,10 +18,10 @@ import { Agent } from '@mastra/core/agent';
 import type { AgentConfig, ToolsInput } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
 import { Memory } from '@mastra/memory';
-import { LibSQLStore } from '@mastra/libsql';
+import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { env } from '$env/dynamic/private';
+import { resolveEmbeddingModel, resolveModel } from '../providers';
 import { promptRegistry } from '../prompts/load';
-import { resolveModel } from '../providers';
 
 /**
  * Dynamic context entries that get appended to the base prompt
@@ -107,6 +107,19 @@ const HARDCODED_FALLBACK = 'openrouter/qwen/qwen3-30b-a3b-instruct-2507';
  *
  * @see https://mastra.ai/docs/server/request-context#fetching-from-a-prompt-registry
  */
+/** Shared DB URL for all agent memory storage. */
+const MEMORY_DB_URL = 'file:./data/memory.db';
+
+/**
+ * Resolves the embedding model string from EMBEDDING_MODEL env var,
+ * mirroring the pattern used by DocumentService and LinkSummaryVectorService.
+ */
+function getEmbeddingModel() {
+	return resolveEmbeddingModel(
+		env.EMBEDDING_MODEL ?? 'lmstudio/text-embedding-nomic-embed-text-v1.5'
+	);
+}
+
 export function createAgent({
 	id,
 	model,
@@ -117,8 +130,20 @@ export function createAgent({
 	const memory = new Memory({
 		storage: new LibSQLStore({
 			id: 'agent-memory-storage',
-			url: 'file:./data/memory.db'
-		})
+			url: MEMORY_DB_URL
+		}),
+		vector: new LibSQLVector({
+			id: 'agent-memory-vector',
+			url: MEMORY_DB_URL
+		}),
+		embedder: getEmbeddingModel(),
+		options: {
+			lastMessages: 20,
+			semanticRecall: {
+				topK: 5,
+				messageRange: 2
+			}
+		}
 	});
 
 	const resolvedModel = resolveModel(model ?? env.DEFAULT_MODEL ?? HARDCODED_FALLBACK);

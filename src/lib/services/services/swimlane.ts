@@ -4,12 +4,24 @@ import type { Application } from './application';
 /** Swimlane names that cannot be deleted by the user. */
 export const NON_REMOVABLE_SWIMLANES = [
 	'Backlog',
-	'Applied',
-	'Rejected',
+	'In Progress',
 	'Action Required',
-	'In Progress'
+	'Applied',
+	'Rejected'
 ] as const;
 export type NonRemovableSwimlane = (typeof NON_REMOVABLE_SWIMLANES)[number];
+
+/**
+ * The canonical display order for the built-in swimlanes.
+ * Custom swimlanes are appended after these in creation order.
+ */
+export const CANONICAL_SWIMLANE_ORDER: NonRemovableSwimlane[] = [
+	'Backlog',
+	'In Progress',
+	'Action Required',
+	'Applied',
+	'Rejected'
+];
 
 export interface Swimlane {
 	id: number;
@@ -140,36 +152,13 @@ export class SwimlaneService {
 	}
 
 	/**
-	 * Move swimlane up or down in order
+	 * Reorder swimlanes by accepting a full ordered list of IDs.
+	 * Each ID is assigned an order_index matching its position in the array.
+	 * IDs not present in the array are left unchanged.
 	 */
-	async reorderSwimlane(id: number, direction: 'up' | 'down'): Promise<void> {
-		const swimlanes = await this.getSwimlanes();
-		const currentIndex = swimlanes.findIndex((s) => s.id === id);
-
-		if (direction === 'up' && currentIndex > 0) {
-			const targetId = swimlanes[currentIndex - 1].id;
-			const currentOrder = swimlanes[currentIndex].order_index;
-			const targetOrder = swimlanes[currentIndex - 1].order_index;
-
-			await this.db.run(
-				`
-        UPDATE swimlanes SET order_index = ? WHERE id = ?;
-        UPDATE swimlanes SET order_index = ? WHERE id = ?
-      `,
-				[targetOrder, id, currentOrder, targetId]
-			);
-		} else if (direction === 'down' && currentIndex < swimlanes.length - 1) {
-			const targetId = swimlanes[currentIndex + 1].id;
-			const currentOrder = swimlanes[currentIndex].order_index;
-			const targetOrder = swimlanes[currentIndex + 1].order_index;
-
-			await this.db.run(
-				`
-        UPDATE swimlanes SET order_index = ? WHERE id = ?;
-        UPDATE swimlanes SET order_index = ? WHERE id = ?
-      `,
-				[targetOrder, id, currentOrder, targetId]
-			);
+	async reorderSwimlanes(orderedIds: number[]): Promise<void> {
+		for (let i = 0; i < orderedIds.length; i++) {
+			await this.db.run(`UPDATE swimlanes SET order_index = ? WHERE id = ?`, [i, orderedIds[i]]);
 		}
 	}
 
@@ -180,34 +169,36 @@ export class SwimlaneService {
 		const existing = await this.db.all(`SELECT COUNT(*) as count FROM swimlanes`);
 
 		if (existing[0]?.count && existing[0].count > 0) {
-			// Ensure the "In Progress" swimlane exists for databases created before it was added.
+			// Run migrations for databases created before certain swimlanes were added,
+			// then normalise the order of built-in swimlanes to the canonical sequence.
 			await this.ensureInProgressSwimlane();
+			await this.normaliseCanonicalOrder();
 			return;
 		}
 
-		const defaultSwimlanes = [
-			{ name: 'Backlog', description: 'Applications waiting to be processed', order: 0 },
+		const defaultSwimlanes: { name: NonRemovableSwimlane; description: string }[] = [
+			{ name: 'Backlog', description: 'Applications waiting to be processed' },
 			{
 				name: 'In Progress',
-				description: 'Applications currently being processed by the pipeline',
-				order: 1
+				description: 'Applications currently being processed by the pipeline'
 			},
-			{ name: 'Applied', description: 'Applications that have been submitted', order: 2 },
-			{ name: 'Rejected', description: 'Applications that were rejected', order: 3 },
-			{ name: 'Action Required', description: 'Applications needing user input', order: 4 }
+			{ name: 'Action Required', description: 'Applications needing user input' },
+			{ name: 'Applied', description: 'Applications that have been submitted' },
+			{ name: 'Rejected', description: 'Applications that were rejected' }
 		];
 
-		for (const swimlane of defaultSwimlanes) {
+		for (let i = 0; i < defaultSwimlanes.length; i++) {
+			const swimlane = defaultSwimlanes[i];
 			await this.db.run(
 				`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 0, ?, datetime('now'))`,
-				[swimlane.name, swimlane.description || null, swimlane.order]
+				[swimlane.name, swimlane.description, i]
 			);
 		}
 	}
 
 	/**
-	 * Ensure the "In Progress" swimlane exists — used as a migration for
-	 * existing databases that were created before this swimlane was added.
+	 * Ensure the "In Progress" swimlane exists — migration for databases
+	 * created before this swimlane was introduced.
 	 */
 	async ensureInProgressSwimlane(): Promise<void> {
 		const existing = await this.db.get(
@@ -215,10 +206,40 @@ export class SwimlaneService {
 		);
 		if (existing) return;
 
-		// Insert between Backlog (order 0) and Applied, shifting everything else up.
-		await this.db.run(`UPDATE swimlanes SET order_index = order_index + 1 WHERE order_index >= 1`);
-		await this.db.run(
-			`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES ('In Progress', 'Applications currently being processed by the pipeline', 0, 1, datetime('now'))`
+		// Temporarily place it at a high order index; normaliseCanonicalOrder will fix positioning.
+		const maxOrder = await this.db.get<{ max: number }>(
+			`SELECT MAX(order_index) as max FROM swimlanes`
 		);
+		const order = (maxOrder?.max ?? 0) + 1;
+		await this.db.run(
+			`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES ('In Progress', 'Applications currently being processed by the pipeline', 0, ?, datetime('now'))`,
+			[order]
+		);
+	}
+
+	/**
+	 * Reorder the built-in swimlanes to match CANONICAL_SWIMLANE_ORDER while
+	 * preserving the relative order of any custom swimlanes (appended at the end).
+	 *
+	 * This is idempotent — safe to call on every startup.
+	 */
+	async normaliseCanonicalOrder(): Promise<void> {
+		const all = await this.getSwimlanes();
+
+		const builtIn = CANONICAL_SWIMLANE_ORDER.map((name) => all.find((s) => s.name === name)).filter(
+			(s): s is Swimlane => s !== undefined
+		);
+
+		const custom = all.filter(
+			(s) => !CANONICAL_SWIMLANE_ORDER.includes(s.name as NonRemovableSwimlane)
+		);
+
+		const ordered = [...builtIn, ...custom];
+
+		for (let i = 0; i < ordered.length; i++) {
+			if (ordered[i].order_index !== i) {
+				await this.db.run(`UPDATE swimlanes SET order_index = ? WHERE id = ?`, [i, ordered[i].id]);
+			}
+		}
 	}
 }
