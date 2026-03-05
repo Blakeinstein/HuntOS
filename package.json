@@ -22,6 +22,7 @@
 		"@ai-sdk/openai": "^3.0.39",
 		"@ai-sdk/openai-compatible": "^2.0.33",
 		"@ai-sdk/svelte": "^4.0.86",
+		"@battlefieldduck/xterm-svelte": "^2.2.1",
 		"@lucide/svelte": "^0.564.0",
 		"@mastra/ai-sdk": "^1.0.4",
 		"@mastra/core": "^1.4.0",

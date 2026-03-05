@@ -3,6 +3,78 @@ import sqlite3 from 'better-sqlite3';
 import fs from 'fs';
 import * as sqliteVec from 'sqlite-vec';
 
+// ANSI codes — rendered natively by xterm.js in the admin log viewer
+const A = {
+	reset: '\x1b[0m',
+	bold: '\x1b[1m',
+	dim: '\x1b[2m',
+	cyan: '\x1b[36m',
+	yellow: '\x1b[33m',
+	red: '\x1b[31m',
+	green: '\x1b[32m',
+	blue: '\x1b[34m',
+	magenta: '\x1b[35m',
+	gray: '\x1b[90m'
+} as const;
+
+const VERB_COLOR: Record<string, string> = {
+	SELECT: A.cyan,
+	INSERT: A.green,
+	UPDATE: A.yellow,
+	DELETE: A.red,
+	CREATE: A.blue,
+	DROP: A.red,
+	ALTER: A.yellow,
+	PRAGMA: A.gray,
+	BEGIN: A.magenta,
+	COMMIT: A.magenta,
+	ROLLBACK: A.magenta
+};
+
+/**
+ * Compact one-line DB logger for better-sqlite3's `verbose` option.
+ * Uses ANSI codes rendered natively by xterm.js in the admin log viewer.
+ * Emits:  [DB] SELECT on users  WHERE id = ?
+ */
+function dbLogger(message?: unknown): void {
+	const trimmed = String(message ?? '')
+		.trim()
+		.replace(/\s+/g, ' ');
+
+	// Extract the SQL verb (first word)
+	const verbMatch = trimmed.match(/^([A-Z]+)/i);
+	const verb = verbMatch ? verbMatch[1].toUpperCase() : '?';
+	const verbColor = VERB_COLOR[verb] ?? A.gray;
+
+	// Try to extract the primary table name from the SQL
+	let table = '';
+	const tablePatterns: RegExp[] = [
+		/\bFROM\s+["'`]?(\w+)["'`]?/i,
+		/\bINTO\s+["'`]?(\w+)["'`]?/i,
+		/\bUPDATE\s+["'`]?(\w+)["'`]?/i,
+		/\bJOIN\s+["'`]?(\w+)["'`]?/i,
+		/\bTABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
+	];
+	for (const re of tablePatterns) {
+		const m = trimmed.match(re);
+		if (m) {
+			table = m[1];
+			break;
+		}
+	}
+
+	// Build the suffix: remainder of the SQL, capped at 80 chars
+	const body = trimmed.slice(verb.length).trim();
+	const suffix = body.length > 80 ? body.slice(0, 77) + '…' : body;
+
+	const tag = `${A.bold}${A.gray}[DB]${A.reset}`;
+	const vPart = `${verbColor}${A.bold}${verb}${A.reset}`;
+	const tPart = table ? ` ${A.dim}on${A.reset} ${A.bold}${table}${A.reset}` : '';
+	const sPart = suffix ? `  ${A.dim}${suffix}${A.reset}` : '';
+
+	process.stdout.write(`${tag} ${vPart}${tPart}${sPart}\n`);
+}
+
 export class Database {
 	private db: sqlite3.Database;
 
@@ -13,7 +85,7 @@ export class Database {
 			fs.mkdirSync(dir, { recursive: true });
 		}
 
-		this.db = new sqlite3(finalDbPath, { verbose: console.log });
+		this.db = new sqlite3(finalDbPath, { verbose: dbLogger });
 
 		// Load the sqlite-vec extension for vector similarity search
 		sqliteVec.load(this.db);

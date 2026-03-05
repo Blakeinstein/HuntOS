@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import LogTerminal from '$lib/components/LogTerminal.svelte';
 
 	function focusAction(node: HTMLElement) {
 		node.focus();
@@ -175,87 +176,13 @@
 	type LogSource = 'dev' | 'chrome';
 
 	let logSource = $state<LogSource>('dev');
-	let logLines = $state<string[]>([]);
 	let logAutoScroll = $state(true);
+	let logTerminal = $state<LogTerminal | null>(null);
 	let logConnected = $state(false);
-	let logEventSource = $state<EventSource | null>(null);
-	let logContainer = $state<HTMLElement | null>(null);
-	let logRetryTimer = $state<ReturnType<typeof setTimeout> | null>(null);
-	let logRetryCount = $state(0);
+	let logReconnecting = $state(false);
 
-	function connectLogs(source: LogSource) {
-		// Cancel any pending retry
-		if (logRetryTimer) {
-			clearTimeout(logRetryTimer);
-			logRetryTimer = null;
-		}
-		if (logEventSource) {
-			logEventSource.close();
-			logEventSource = null;
-		}
-		logLines = [];
-		logConnected = false;
-		logRetryCount = 0;
-
-		openEventSource(source);
-	}
-
-	function openEventSource(source: LogSource) {
-		const es = new EventSource(`/api/admin/logs?source=${source}`);
-		logEventSource = es;
-
-		es.addEventListener('log', (e: MessageEvent) => {
-			const line: string = JSON.parse(e.data);
-			logLines.push(line);
-			// Keep max 2000 lines in memory
-			if (logLines.length > 2000) {
-				logLines = logLines.slice(-2000);
-			}
-			if (logAutoScroll) {
-				scrollLogsToBottom();
-			}
-		});
-
-		es.addEventListener('clear', () => {
-			logLines = [];
-		});
-
-		es.onopen = () => {
-			logConnected = true;
-			logRetryCount = 0;
-		};
-
-		es.onerror = () => {
-			logConnected = false;
-			es.close();
-			logEventSource = null;
-
-			// Exponential backoff: 1s, 2s, 4s, 8s, capped at 16s
-			const delay = Math.min(1000 * Math.pow(2, logRetryCount), 16_000);
-			logRetryCount += 1;
-			logRetryTimer = setTimeout(() => {
-				logRetryTimer = null;
-				openEventSource(source);
-			}, delay);
-		};
-	}
-
-	function scrollLogsToBottom() {
-		// Use a microtask so the DOM has time to update
-		setTimeout(() => {
-			if (logContainer) {
-				logContainer.scrollTop = logContainer.scrollHeight;
-			}
-		}, 0);
-	}
-
-	function changeLogSource(source: LogSource) {
-		logSource = source;
-		connectLogs(source);
-	}
-
-	function clearLogs() {
-		logLines = [];
+	function logSrc(source: LogSource) {
+		return `/api/admin/logs?source=${source}`;
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -367,15 +294,8 @@
 		// Connect logs when tab is first opened lazily
 	});
 
-	$effect(() => {
-		if (activeTab === 'logs' && !logEventSource && !logRetryTimer) {
-			connectLogs(logSource);
-		}
-	});
-
 	onDestroy(() => {
-		if (logRetryTimer) clearTimeout(logRetryTimer);
-		logEventSource?.close();
+		// LogTerminal handles its own cleanup via onDestroy
 	});
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -711,7 +631,7 @@
 							type="button"
 							class="rounded px-3 py-1 text-xs font-medium transition-colors
 								{logSource === src.id ? 'preset-filled-primary-500' : 'hover:preset-tonal'}"
-							onclick={() => changeLogSource(src.id)}
+							onclick={() => (logSource = src.id)}
 						>
 							{src.label}
 						</button>
@@ -723,14 +643,14 @@
 					<span
 						class="size-2 rounded-full {logConnected
 							? 'animate-pulse bg-success-500'
-							: logRetryTimer
+							: logReconnecting
 								? 'animate-pulse bg-warning-500'
 								: 'bg-error-500'}"
 					></span>
 					<span class="opacity-60">
 						{#if logConnected}
 							Connected
-						{:else if logRetryTimer}
+						{:else if logReconnecting}
 							Reconnecting…
 						{:else}
 							Disconnected
@@ -747,17 +667,25 @@
 						<button
 							type="button"
 							class="btn preset-tonal btn-sm"
-							onclick={() => connectLogs(logSource)}
+							onclick={() => logTerminal?.connect()}
 						>
-							<RefreshCwIcon class="size-3.5 {logRetryTimer ? 'animate-spin' : ''}" />
+							<RefreshCwIcon class="size-3.5 {logReconnecting ? 'animate-spin' : ''}" />
 							Reconnect
 						</button>
 					{/if}
-					<button type="button" class="btn preset-tonal btn-sm" onclick={clearLogs}>
+					<button
+						type="button"
+						class="btn preset-tonal btn-sm"
+						onclick={() => logTerminal?.clear()}
+					>
 						<XIcon class="size-3.5" />
 						Clear
 					</button>
-					<button type="button" class="btn preset-tonal btn-sm" onclick={scrollLogsToBottom}>
+					<button
+						type="button"
+						class="btn preset-tonal btn-sm"
+						onclick={() => logTerminal?.scrollBottom()}
+					>
 						<ChevronRightIcon class="size-3.5 rotate-90" />
 						Bottom
 					</button>
@@ -766,32 +694,15 @@
 
 			<!-- Log output -->
 			<div
-				bind:this={logContainer}
-				class="h-[calc(100vh-280px)] min-h-75 overflow-y-auto rounded-xl border border-surface-200-800 bg-[#0d1117] p-4 font-mono text-xs leading-relaxed"
+				class="h-[calc(100vh-280px)] min-h-75 overflow-hidden rounded-xl border border-surface-200-800"
 			>
-				{#if logLines.length === 0}
-					<div class="flex h-full items-center justify-center opacity-30">
-						Waiting for log output…
-					</div>
-				{:else}
-					{#each logLines as line, i (i)}
-						{@const isError = /\b(error|err|failed|exception|fatal)\b/i.test(line)}
-						{@const isWarn = /\b(warn|warning)\b/i.test(line)}
-						{@const isSuccess = /\b(success|ready|listening|started)\b/i.test(line)}
-						<div
-							class="break-all whitespace-pre-wrap
-								{isError
-								? 'text-red-400'
-								: isWarn
-									? 'text-yellow-400'
-									: isSuccess
-										? 'text-green-400'
-										: 'text-gray-300'}"
-						>
-							{line}
-						</div>
-					{/each}
-				{/if}
+				<LogTerminal
+					bind:this={logTerminal}
+					src={logSrc(logSource)}
+					bind:autoScroll={logAutoScroll}
+					bind:connected={logConnected}
+					bind:reconnecting={logReconnecting}
+				/>
 			</div>
 		</div>
 	{/if}
