@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
+
 	import {
 		LoaderCircleIcon,
 		CheckCircleIcon,
@@ -17,7 +18,8 @@
 		InfoIcon,
 		AlertCircleIcon,
 		MessageSquareIcon,
-		ClipboardListIcon
+		ClipboardListIcon,
+		ScrollTextIcon
 	} from '@lucide/svelte';
 	import type {
 		PipelineRun,
@@ -27,6 +29,12 @@
 	} from '$lib/services/types';
 	import { PIPELINE_STEPS, PIPELINE_STEP_LABELS } from '$lib/services/types';
 
+	interface ResumeHistoryEntry {
+		id: number;
+		pdf_path: string | null;
+		pdf_exists: boolean;
+	}
+
 	interface Props {
 		applicationId: number;
 		pipelineRuns: PipelineRun[];
@@ -34,6 +42,7 @@
 		resources: ApplicationResource[];
 		isBacklog: boolean;
 		initialStepLogs?: PipelineStepLog[];
+		resumeHistoryEntry?: ResumeHistoryEntry | null;
 		onApply?: () => void;
 		onResumeFrom?: (step: PipelineStep) => void;
 	}
@@ -45,9 +54,16 @@
 		resources,
 		isBacklog,
 		initialStepLogs = [],
+		resumeHistoryEntry = null,
 		onApply,
 		onResumeFrom
 	}: Props = $props();
+
+	const resumePdfAdminUrl = $derived(
+		resumeHistoryEntry?.pdf_exists && resumeHistoryEntry.pdf_path
+			? `/settings/admin?tab=files&bucket=resumes&file=${encodeURIComponent(resumeHistoryEntry.pdf_path.split('/').pop() ?? '')}`
+			: null
+	);
 
 	const LOG_TRUNCATE_LENGTH = 200;
 
@@ -651,33 +667,50 @@
 				{@const ResourceIcon = getResourceIcon(resource.resource_type)}
 				{@const isExpanded = expandedResources.has(resource.id)}
 				<div class="card border border-surface-200-800 bg-surface-50-950">
-					<button
-						type="button"
-						class="flex w-full items-center gap-3 p-3 text-left hover:bg-surface-100-900"
-						onclick={() => toggleResource(resource.id)}
-					>
-						<ResourceIcon class="size-4 shrink-0 opacity-50" />
-						<div class="min-w-0 flex-1">
-							<p class="truncate text-sm font-semibold">{resource.title}</p>
-							<div class="mt-0.5 flex items-center gap-2">
-								<span
-									class="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium {getResourceBadgeColor(
-										resource.resource_type
-									)}"
-								>
-									{formatResourceType(resource.resource_type)}
-								</span>
-								<span class="text-[10px] opacity-40">
-									{new Date(resource.created_at).toLocaleTimeString()}
-								</span>
+					<div class="flex w-full items-center gap-3 p-3">
+						<!-- Expand/collapse clickable area -->
+						<button
+							type="button"
+							class="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-80"
+							onclick={() => toggleResource(resource.id)}
+						>
+							<ResourceIcon class="size-4 shrink-0 opacity-50" />
+							<div class="min-w-0 flex-1">
+								<p class="truncate text-sm font-semibold">{resource.title}</p>
+								<div class="mt-0.5 flex items-center gap-2">
+									<span
+										class="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium {getResourceBadgeColor(
+											resource.resource_type
+										)}"
+									>
+										{formatResourceType(resource.resource_type)}
+									</span>
+									<span class="text-[10px] opacity-40">
+										{new Date(resource.created_at).toLocaleTimeString()}
+									</span>
+								</div>
 							</div>
-						</div>
-						{#if isExpanded}
-							<ChevronUpIcon class="size-4 shrink-0 opacity-40" />
-						{:else}
-							<ChevronDownIcon class="size-4 shrink-0 opacity-40" />
+							{#if isExpanded}
+								<ChevronUpIcon class="size-4 shrink-0 opacity-40" />
+							{:else}
+								<ChevronDownIcon class="size-4 shrink-0 opacity-40" />
+							{/if}
+						</button>
+
+						<!-- PDF link (outside expand button to avoid button-in-button) -->
+						{#if resource.resource_type === 'resume' && resumePdfAdminUrl}
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+							<a
+								href={resumePdfAdminUrl}
+								rel="external"
+								class="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] font-medium text-primary-500 transition-colors hover:bg-primary-500/25"
+								title="View PDF in Data Files"
+							>
+								<ScrollTextIcon class="size-2.5" />
+								View PDF
+							</a>
 						{/if}
-					</button>
+					</div>
 
 					{#if isExpanded}
 						<div class="border-t border-surface-200-800 p-3">

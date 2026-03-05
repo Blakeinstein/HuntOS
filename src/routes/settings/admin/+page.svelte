@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import LogTerminal from '$lib/components/LogTerminal.svelte';
+	import CronbakeEditor from '$lib/components/CronbakeEditor.svelte';
 
 	function focusAction(node: HTMLElement) {
 		node.focus();
@@ -21,11 +22,12 @@
 		Loader2Icon,
 		ImageIcon,
 		FileIcon,
-		ScrollTextIcon
+		ScrollTextIcon,
+		ClockIcon
 	} from '@lucide/svelte';
 
 	// ── Tab state ─────────────────────────────────────────────────────────────
-	type Tab = 'db' | 'logs' | 'files';
+	type Tab = 'db' | 'logs' | 'files' | 'cronbake';
 	let activeTab = $state<Tab>('db');
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -300,7 +302,32 @@
 	onMount(async () => {
 		await loadTables();
 		await loadBuckets();
-		// Connect logs when tab is first opened lazily
+
+		// Handle deep-link URL params: ?tab=files&bucket=resumes&file=foo.pdf
+		const url = new URL(window.location.href);
+		const tabParam = url.searchParams.get('tab') as Tab | null;
+		const bucketParam = url.searchParams.get('bucket') as FileBucket | null;
+		const fileParam = url.searchParams.get('file');
+
+		if (tabParam === 'files' && bucketParam && VALID_BUCKETS_SET.has(bucketParam)) {
+			activeTab = 'files';
+
+			await selectBucket(bucketParam);
+
+			if (fileParam) {
+				// Find the matching file entry and open it for preview
+				const entry = bucketFiles.find((f) => f.relPath === fileParam || f.name === fileParam);
+				if (entry) {
+					await previewFileEntry(entry);
+				}
+			}
+
+			// Clean up the URL params without triggering navigation
+			url.searchParams.delete('tab');
+			url.searchParams.delete('bucket');
+			url.searchParams.delete('file');
+			window.history.replaceState({}, '', url.toString());
+		}
 	});
 
 	onDestroy(() => {
@@ -320,6 +347,9 @@
 	function isLongValue(val: unknown): boolean {
 		return typeof val === 'string' && val.length > 60;
 	}
+
+	// ── Constants ─────────────────────────────────────────────────────────────
+	const VALID_BUCKETS_SET = new Set<string>(['resumes', 'screenshots', 'user-resources']);
 
 	function bucketIcon(bucket: string) {
 		if (bucket === 'resumes') return FileTextIcon;
@@ -357,7 +387,7 @@
 
 	<!-- Tabs -->
 	<div class="flex gap-1 border-b border-surface-200-800">
-		{#each [{ id: 'db' as Tab, label: 'Database', icon: DatabaseIcon }, { id: 'logs' as Tab, label: 'Server Logs', icon: ScrollTextIcon }, { id: 'files' as Tab, label: 'Data Files', icon: FolderIcon }] as tab (tab.id)}
+		{#each [{ id: 'db' as Tab, label: 'Database', icon: DatabaseIcon }, { id: 'logs' as Tab, label: 'Server Logs', icon: ScrollTextIcon }, { id: 'files' as Tab, label: 'Data Files', icon: FolderIcon }, { id: 'cronbake' as Tab, label: 'Cronbake State', icon: ClockIcon }] as tab (tab.id)}
 			{@const Icon = tab.icon}
 			<button
 				type="button"
@@ -936,5 +966,10 @@
 				</div>
 			</div>
 		{/if}
+	{/if}
+
+	<!-- ── CRONBAKE TAB ───────────────────────────────────────────────────────── -->
+	{#if activeTab === 'cronbake'}
+		<CronbakeEditor />
 	{/if}
 </div>

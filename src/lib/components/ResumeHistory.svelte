@@ -21,7 +21,8 @@
 		CheckCircleIcon,
 		FileIcon,
 		RocketIcon,
-		ExternalLinkIcon
+		ExternalLinkIcon,
+		ScrollTextIcon
 	} from '@lucide/svelte';
 	import CartaEditor from '$lib/components/CartaEditor.svelte';
 
@@ -54,6 +55,13 @@
 	}
 
 	let { history }: Props = $props();
+
+	// ── Helpers ──────────────────────────────────────────────────
+
+	function adminPdfUrl(pdfPath: string): string {
+		const filename = pdfPath.split('/').pop() ?? '';
+		return `/settings/admin?tab=files&bucket=resumes&file=${encodeURIComponent(filename)}`;
+	}
 
 	// ── Local state ──────────────────────────────────────────────
 	let searchQuery = $state('');
@@ -370,6 +378,20 @@
 
 								<!-- Actions -->
 								<div class="flex shrink-0 items-center gap-1">
+									<!-- View PDF in admin files -->
+									{#if entry.pdf_exists && entry.pdf_path}
+										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+										<a
+											href={adminPdfUrl(entry.pdf_path)}
+											rel="external"
+											class="btn-icon btn-icon-sm text-primary-500 hover:preset-tonal"
+											title="View PDF in Data Files"
+											onclick={(e) => e.stopPropagation()}
+										>
+											<ScrollTextIcon class="size-3.5" />
+										</a>
+									{/if}
+
 									<!-- Preview -->
 									<button
 										type="button"
@@ -437,8 +459,15 @@
 											{(entry.data.education as unknown[]).length} education
 										</span>
 									{/if}
-									{#if entry.pdf_exists}
-										<span class="badge preset-filled-primary-500 text-[10px]">PDF</span>
+									{#if entry.pdf_exists && entry.pdf_path}
+										<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+										<a
+											href={adminPdfUrl(entry.pdf_path)}
+											rel="external"
+											class="hover:preset-filled-primary-400 badge preset-filled-primary-500 text-[10px] transition-colors"
+											title="View PDF in Data Files"
+											onclick={(e) => e.stopPropagation()}>PDF ↗</a
+										>
 									{/if}
 									{#if !entry.file_exists}
 										<span class="badge preset-filled-warning-500 text-[10px]">File missing</span>

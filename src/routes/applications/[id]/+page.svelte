@@ -40,6 +40,13 @@
 	const stepLogs = $derived(
 		((data as Record<string, unknown>).stepLogs as Array<PipelineStepLog>) ?? []
 	);
+	const resumeHistoryEntry = $derived(
+		((data as Record<string, unknown>).resumeHistoryEntry as {
+			id: number;
+			pdf_path: string | null;
+			pdf_exists: boolean;
+		} | null) ?? null
+	);
 
 	let activeTab = $state('details');
 	let notes = $state('');
@@ -384,6 +391,7 @@
 						{resources}
 						isBacklog={canApply}
 						initialStepLogs={stepLogs}
+						{resumeHistoryEntry}
 						onApply={() => handleApply()}
 						onResumeFrom={(step) => handleApply(step)}
 					/>

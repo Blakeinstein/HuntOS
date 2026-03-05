@@ -60,7 +60,6 @@ export interface SchedulerJobStatus {
 /** Cron configuration snapshot — used to detect when reconfiguration is needed. */
 interface CronSnapshot {
 	scraperEnabled: boolean;
-	emailSyncCron: string;
 	auditCleanupEnabled: boolean;
 	auditCleanupCron: string;
 	autoApplyEnabled: boolean;
@@ -109,7 +108,6 @@ export class SchedulerService {
 		const { appSettingsService } = this.deps;
 		return {
 			scraperEnabled: appSettingsService.scraperEnabled,
-			emailSyncCron: appSettingsService.emailSyncCron,
 			auditCleanupEnabled: appSettingsService.auditCleanupEnabled,
 			auditCleanupCron: appSettingsService.auditCleanupCron,
 			autoApplyEnabled: appSettingsService.autoApplyEnabled,
@@ -159,40 +157,138 @@ export class SchedulerService {
 		if (!this.baker) return;
 
 		const snapshot = this.readCronSnapshot();
-		this.currentCrons = snapshot;
+		// NOTE: currentCrons is set at the END of this method, derived from
+		// actual live baker state, so reconfigure() diffs against reality.
 
-		// Scrape job boards (only register if enabled)
-		// Uses a fixed internal cron — per-board intervals are checked at runtime.
-		if (snapshot.scraperEnabled) {
-			this.registerScraperJob(SCRAPER_INTERNAL_CRON);
-		}
+		// Cronbake is the single source of truth for job state.
+		// After baker.ready() the persistence file has already been restored —
+		// any job that was saved (with its status, cron, metrics, history) is
+		// already live in the baker.  We only bootstrap a job here when it is
+		// NOT present in the baker yet (i.e. first run, or it was intentionally
+		// removed from the state file via the admin Cronbake editor).
+		//
+		// Callbacks are always wired regardless of source so that restored jobs
+		// have a real handler instead of the no-op stub cronbake inserts.
 
-		// Sync emails — always registered (no user toggle yet)
-		this.baker.add({
-			name: JOB_EMAIL_SYNC,
-			cron: snapshot.emailSyncCron,
-			persist: true,
-			overrunProtection: true,
-			callback: () => this.runSyncEmails(),
-			onTick: () => {
-				schedulerLogger.info(`[${JOB_EMAIL_SYNC}] Tick — starting execution`);
-			},
-			onComplete: () => {
-				schedulerLogger.info(`[${JOB_EMAIL_SYNC}] Execution complete`);
-			},
-			onError: (error: Error) => {
-				schedulerLogger.error(`[${JOB_EMAIL_SYNC}] Failed: ${error.message}`);
+		const has = (name: string) => this.getJobNames().includes(name);
+
+		// ── scrape-job-boards ────────────────────────────────────────────────
+		// Bootstrap only when absent AND the setting says it should be enabled.
+		if (!has(JOB_SCRAPE)) {
+			if (snapshot.scraperEnabled) {
+				this.registerScraperJob(SCRAPER_INTERNAL_CRON);
+				schedulerLogger.info(`[init] Bootstrapped ${JOB_SCRAPE} (not in state file)`);
 			}
-		});
-
-		// Audit log cleanup (only register if enabled)
-		if (snapshot.auditCleanupEnabled) {
-			this.registerAuditCleanupJob(snapshot.auditCleanupCron);
+		} else {
+			// Job was restored from file — just wire the real callback.
+			this.wireCallback(JOB_SCRAPE, () => this.runScrapeJobBoards(), JOB_SCRAPE);
 		}
 
-		// Auto-apply (only register if enabled)
-		if (snapshot.autoApplyEnabled) {
-			this.registerAutoApplyJob(snapshot.autoApplyCron);
+		// ── sync-emails ──────────────────────────────────────────────────────
+		// TODO: Email sync is not yet fully implemented. The job is intentionally
+		// never bootstrapped. If a stale entry exists in the cronbake state file,
+		// remove it — we do NOT wire a callback so it stays inert.
+
+		// ── audit-cleanup ────────────────────────────────────────────────────
+		if (!has(JOB_AUDIT_CLEANUP)) {
+			if (snapshot.auditCleanupEnabled) {
+				this.registerAuditCleanupJob(snapshot.auditCleanupCron);
+				schedulerLogger.info(`[init] Bootstrapped ${JOB_AUDIT_CLEANUP} (not in state file)`);
+			}
+		} else {
+			this.wireCallback(JOB_AUDIT_CLEANUP, () => this.runAuditCleanup(), JOB_AUDIT_CLEANUP);
+		}
+
+		// ── auto-apply ───────────────────────────────────────────────────────
+		if (!has(JOB_AUTO_APPLY)) {
+			if (snapshot.autoApplyEnabled) {
+				this.registerAutoApplyJob(snapshot.autoApplyCron);
+				schedulerLogger.info(`[init] Bootstrapped ${JOB_AUTO_APPLY} (not in state file)`);
+			}
+		} else {
+			this.wireCallback(JOB_AUTO_APPLY, () => this.runAutoApply(), JOB_AUTO_APPLY);
+		}
+
+		// Derive currentCrons from what actually ended up live in the baker.
+		// For jobs restored from the file, use the cron stored in the file
+		// rather than the appSettings value — the file is the source of truth.
+		// If a stale sync-emails entry survived in the state file, evict it now
+		// so it doesn't linger as an inert restored job with a no-op callback.
+		if (this.baker.getJobNames().includes(JOB_EMAIL_SYNC)) {
+			try {
+				this.baker.stop(JOB_EMAIL_SYNC);
+				this.baker.remove(JOB_EMAIL_SYNC);
+				schedulerLogger.info(`[init] Removed stale ${JOB_EMAIL_SYNC} entry from state file`);
+			} catch {
+				// ignore
+			}
+		}
+
+		const liveJobs = this.baker.getAllJobs();
+		this.currentCrons = {
+			scraperEnabled: liveJobs.has(JOB_SCRAPE),
+			auditCleanupEnabled: liveJobs.has(JOB_AUDIT_CLEANUP),
+			auditCleanupCron: liveJobs.get(JOB_AUDIT_CLEANUP)?.cron ?? snapshot.auditCleanupCron,
+			autoApplyEnabled: liveJobs.has(JOB_AUTO_APPLY),
+			autoApplyCron: liveJobs.get(JOB_AUTO_APPLY)?.cron ?? snapshot.autoApplyCron
+		};
+
+		schedulerLogger.info(
+			`[init] currentCrons derived from live state — ` +
+				`scraper:${this.currentCrons.scraperEnabled} ` +
+				`auditCleanup:${this.currentCrons.auditCleanupEnabled} ` +
+				`autoApply:${this.currentCrons.autoApplyEnabled}`
+		);
+	}
+
+	/**
+	 * Wire a real callback onto an already-restored cronbake job.
+	 * Cronbake's restore stub emits a warning log when the job fires without
+	 * a real handler, so we replace it by removing + re-adding the job while
+	 * preserving the cron expression it was restored with.
+	 */
+	private wireCallback(name: string, callback: () => void, logTag: string): void {
+		if (!this.baker) return;
+		try {
+			// Grab the cron expression and running status before we remove the job.
+			const allJobs = this.baker.getAllJobs();
+			const restoredJob = allJobs.get(name);
+			const restoredCron: string = restoredJob?.cron ?? '';
+
+			if (!restoredCron) {
+				schedulerLogger.warn(`[init] wireCallback: could not find cron for restored job "${name}"`);
+				return;
+			}
+
+			// Preserve whether the job was running so we can restart it after re-add.
+			const wasRunning = this.baker.getStatus(name) === 'running';
+
+			// remove() destroys the no-op-callback job and clears it from restoredJobs.
+			this.baker.remove(name);
+
+			this.baker.add({
+				name,
+				cron: restoredCron,
+				persist: true,
+				overrunProtection: true,
+				callback,
+				onTick: () => schedulerLogger.info(`[${logTag}] Tick — starting execution`),
+				onComplete: () => schedulerLogger.info(`[${logTag}] Execution complete`),
+				onError: (error: Error) => schedulerLogger.error(`[${logTag}] Failed: ${error.message}`)
+			});
+
+			// Re-start if it was running before we swapped the callback.
+			if (wasRunning) {
+				this.baker.bake(name);
+			}
+
+			schedulerLogger.info(
+				`[init] Wired real callback onto restored job "${name}" (cron: ${restoredCron}, running: ${wasRunning})`
+			);
+		} catch (err) {
+			schedulerLogger.warn(
+				`[init] wireCallback failed for "${name}": ${err instanceof Error ? err.message : String(err)}`
+			);
 		}
 	}
 
@@ -284,6 +380,7 @@ export class SchedulerService {
 
 		if (!old) {
 			this.currentCrons = newSnapshot;
+			await this.baker.saveState();
 			return { changed: [] };
 		}
 
@@ -298,19 +395,6 @@ export class SchedulerService {
 
 			// Re-register based on job name
 			switch (name) {
-				case JOB_EMAIL_SYNC:
-					this.baker!.add({
-						name: JOB_EMAIL_SYNC,
-						cron: newCron,
-						persist: true,
-						overrunProtection: true,
-						callback: () => this.runSyncEmails(),
-						onTick: () => schedulerLogger.info(`[${JOB_EMAIL_SYNC}] Tick — starting execution`),
-						onComplete: () => schedulerLogger.info(`[${JOB_EMAIL_SYNC}] Execution complete`),
-						onError: (error: Error) =>
-							schedulerLogger.error(`[${JOB_EMAIL_SYNC}] Failed: ${error.message}`)
-					});
-					break;
 				case JOB_AUDIT_CLEANUP:
 					this.registerAuditCleanupJob(newCron);
 					break;
@@ -373,10 +457,7 @@ export class SchedulerService {
 			schedulerLogger.info('[reconfigure] Disabled scraper');
 		}
 
-		// Email sync — always registered, only check cron change
-		if (newSnapshot.emailSyncCron !== old.emailSyncCron) {
-			updateJobCron(JOB_EMAIL_SYNC, newSnapshot.emailSyncCron);
-		}
+		// sync-emails is not yet implemented — skipped in reconfigure()
 
 		// Handle audit cleanup enable/disable + cron change
 		handleToggleableJob(
@@ -401,6 +482,9 @@ export class SchedulerService {
 		);
 
 		this.currentCrons = newSnapshot;
+
+		// Always persist after reconfigure so the file stays in sync with the
+		// live baker state (enable/disable + cron changes are reflected on disk).
 		await this.baker.saveState();
 
 		if (changed.length > 0) {

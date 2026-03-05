@@ -5,6 +5,7 @@ import { db } from '$lib/db';
 
 export const load: PageServerLoad = async ({ params, depends }) => {
 	depends(`db:application:${params.id}`);
+	depends('db:resume-history');
 
 	const services = createServices(db);
 	const applicationId = Number(params.id);
@@ -27,12 +28,16 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 		? services.applicationPipelineService.getStepLogs(latestPipelineRun.id)
 		: [];
 
+	// Load the resume history entry linked to this application (if any)
+	const resumeHistoryEntry = services.resumeHistoryService.getByApplicationId(applicationId);
+
 	return {
 		application,
 		history,
 		pipelineRuns,
 		latestPipelineRun,
 		stepLogs,
-		resources
+		resources,
+		resumeHistoryEntry: resumeHistoryEntry ?? null
 	};
 };
