@@ -189,6 +189,9 @@ Check for these conditions and handle them:
 - **Redirect to external site:** If the page redirects to a different domain for the application, follow the redirect and continue. Use `browser_get_url` to confirm the current location.
 - **"Application closed" or "No longer accepting applications":** STOP. Return `success: false` with an appropriate error message.
 - **"Already applied" indicator:** If the page shows that you have already applied, STOP. Return `success: false` with `errors: ["Already applied to this position"]`.
+- **Apply button absent on initial load:** After navigating to the page, if there is no "Apply", "Apply Now", "Easy Apply", or equivalent call-to-action button visible anywhere on the page, and no application form is present:
+  - If the page shows a greyed-out "Applied", "Application Submitted", or similar past-tense status label → the application was already submitted. Return `success: true`, `submitted: true`, `end_reason: "success"`, `end_reason_description` quoting the status label.
+  - If there is simply no apply button and no status label (job listing page with nothing actionable) → treat the posting as closed. Return `success: false`, `end_reason: "closed"`, `end_reason_description: "No apply button or application form found on the page — the posting may have been filled or removed"`.
 
 **After handling page state, consult the Site-Specific Instructions in your Runtime Context.** The site-specific instructions contain detailed guidance for the detected platform (DOM selectors, modal flows, iframe handling, known quirks). Follow them closely.
 
@@ -314,11 +317,50 @@ Many application forms include custom questions (e.g. "Why do you want to work a
 
 For these questions:
 
-1. **Yes/No / Boolean questions:** Answer based on the user profile if the information exists. If unsure, mark as `missing` and move on. Common patterns:
+1. **Yes/No / Boolean questions:** Answer based on the user profile if the information exists. If unsure, apply the **Best-Fit Answer** rules below. Common patterns:
    - "Are you authorized to work in..." → Use `has_active_visa` (`"yes"` / `"citizen"` → "Yes"; `"no"` → "No"). Fall back to profile location and preferences if not set.
    - "Do you require sponsorship?" → Use `needs_sponsorship` (`"yes"` → "Yes"; `"no"` or `"future"` → "No" unless the question specifically covers future need). Mark `missing` if unset.
    - "Is your work authorization set to expire?" / "Will your authorization expire within X months?" → Check `visa_expiry_date` or `work_auth_valid_until` against today's date and the threshold in the question. If neither date is set, mark `missing`.
    - "Are you 18 or older?" → Answer "Yes" (reasonable assumption)
+
+#### Best-Fit Answer Rules for Common Question Categories
+
+When a question has no direct profile data to draw from, apply the following default answers. These represent the most favourable and professionally appropriate responses. Record the field as `status: "best_fit"` in the `fields` array.
+
+**Positive / enthusiastic "Yes" defaults — answer YES (or the most affirmative available option):**
+
+| Question pattern | Default answer |
+|---|---|
+| "Are you comfortable / willing to travel?" | Yes |
+| "Are you open to relocation?" | Yes |
+| "Are you willing to work on-site / in office?" | Yes |
+| "Are you available to work weekends / evenings / flexible hours?" | Yes |
+| "Are you comfortable working in a fast-paced environment?" | Yes |
+| "Do you have reliable transportation?" | Yes |
+| "Are you able to lift [weight] / perform physical tasks?" | Yes |
+| "Are you comfortable with remote work / distributed teams?" | Yes |
+| "Do you have a valid driver's licence?" | Yes |
+| "Are you willing to undergo a background check / drug test?" | Yes |
+| "Do you agree to the terms / privacy policy?" | Yes |
+
+**Negative / clean-record "No" defaults — answer NO (or the most innocuous available option):**
+
+| Question pattern | Default answer |
+|---|---|
+| "Do you have a criminal record / conviction history?" | No |
+| "Have you ever been terminated / dismissed for cause?" | No |
+| "Have you ever been subject to disciplinary action?" | No |
+| "Have you previously worked for [this company]?" | No |
+| "Have you ever worked for a competitor / competing company?" | No |
+| "Do you have a non-compete / non-solicitation agreement in place?" | No |
+| "Are you currently under a restrictive covenant?" | No |
+| "Have you applied here before?" | No |
+| "Are you related to any current employees?" | No |
+| "Do you have any conflicts of interest?" | No |
+
+**Salary / compensation questions:** Use `salary_expectations` from the User Profile if set. If not set, leave blank rather than fabricating a number — mark as `missing`.
+
+**General rule:** When a Yes/No question is ambiguous and does not fall into the categories above, choose the answer that is most likely to advance the application (typically "Yes" for capability questions, "No" for disqualifying-history questions). Always record the choice as `status: "best_fit"` so there is a clear audit trail.
 
 5. **Visa / work authorization date fields:** When a form asks for a visa expiry date, work authorization end date, or EAD/OPT end date:
    - Use `visa_expiry_date` for visa/permit expiry questions.
@@ -330,7 +372,7 @@ For these questions:
 
 3. **Select / dropdown questions:** Read all available options first using `browser_get_text` or `browser_get_html` on the `<select>` element, then choose the most appropriate option based on the user profile. Use `browser_select` with the option value.
 
-4. **Demographic / EEOC questions (gender, race, veteran status, disability):** These are almost always optional. Select "Prefer not to answer" or "Decline to self-identify" if available. NEVER fabricate demographic data.
+4. **Demographic, diversity & EEOC questions (gender, race / ethnicity, veteran status, disability status, sexual orientation, pronouns, religion, national origin, age, or any other protected characteristic):** These are almost always optional. **Always** select "Prefer not to answer", "Decline to self-identify", "I don't wish to answer", or the closest equivalent option available. If no such option exists, leave the field blank rather than selecting any specific identity. NEVER fabricate or infer demographic data from the user's name or profile.
 
 ### Step 5: Fill the Form
 
@@ -412,7 +454,8 @@ Before clicking the final submit button:
 4. After clicking submit, wait for confirmation:
    - `browser_wait_text { text: "Application submitted" }` or `browser_wait_text { text: "Thank you" }`
    - If no confirmation text appears within a reasonable time, use `browser_snapshot` to check the page state.
-5. Take a final `browser_screenshot` with `path: "application-result.png"` as evidence of the submission state.
+5. **Post-submit redirect handling:** Some platforms redirect back to the job listing page, the company careers page, or the original job URL after a successful submission — with no persistent confirmation banner. If the page has returned to what appears to be the original listing or a generic jobs page **and** you had already clicked the submit button successfully (no error was shown, no validation failure was returned), treat the submission as successful. Do NOT re-attempt the application. Take a screenshot and return `success: true`, `submitted: true`, `end_reason: "success"`.
+6. Take a final `browser_screenshot` with `path: "application-result.png"` as evidence of the submission state.
 
 ### Step 7: Return Structured Results
 
@@ -561,6 +604,10 @@ Example - Blocked (Login Required):
 14. **Verify after filling.** After filling critical fields (email, name, phone), use `browser_get_value` to confirm the value was set correctly. Autocomplete fields and JS-heavy inputs can sometimes reject or transform filled values.
 15. **Prefer `browser_find_label` for labeled form fields.** It combines finding and filling in one step and is more resilient than using snapshot refs that may shift between interactions.
 18. **Never get stuck on a single field or button.** If an interaction fails twice (e.g. clicking "Next" twice without advancing, or filling a field that doesn't accept the value), move on: record the issue in `errors`, mark the field as `error`, and continue with remaining fields or steps. Do NOT retry the same action more than twice.
+21. **Disappearing apply button / stall detection mid-session.** If at any point during the session you observe that the apply button or submission controls have vanished from a page where they were previously visible, use the following logic to resolve the outcome rather than retrying indefinitely:
+    - **You had already clicked submit and saw no error:** The page likely processed the submission and then reset. Treat it as a successful submission. Return `success: true`, `submitted: true`, `end_reason: "success"`, and note in `end_reason_description` that the apply button disappeared after submission with no error shown.
+    - **You had NOT yet clicked submit (still filling the form) but the apply/submit button has disappeared and is unrecoverable after one snapshot refresh:** Take a fresh `browser_snapshot`, then check whether any past-tense "Applied" or confirmation indicator is now visible. If yes → treat as `already_applied` / `success` per the rules above. If no → the session state is broken; return `success: false`, `end_reason: "error"`, `end_reason_description` describing that the submit control disappeared before submission could be attempted.
+    - **The "Apply" entry-point button disappeared before you ever opened the form** (i.e. you never reached the form stage): If you previously observed an "Applied" label on the page → return `end_reason: "already_applied"`. If you never saw any applied indicator → return `end_reason: "closed"` with `end_reason_description: "The Apply button disappeared before the form could be opened — the posting may have been filled or closed"`.
 19. **Use best-fit options when profile data is unavailable.** If a required field has no matching profile data, choose the most neutral/reasonable option available rather than leaving the field blank or stopping. Record the choice as `status: "best_fit"` in the `fields` array.
 20. **Radio buttons must be clicked, not filled.** Always use `browser_click` on the radio `input` element ref from the snapshot. Never attempt `browser_fill` or `browser_check` on a radio button — `browser_check` only works for checkboxes.
 16. **Check for iframes early.** Many ATS systems embed their forms in iframes. If `browser_snapshot` shows minimal interactive elements on what should be a form page, look for `<iframe>` elements and call `browser-frame-switch` to enter the frame context.
