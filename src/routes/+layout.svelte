@@ -1,8 +1,10 @@
 <script lang="ts">
 	import './layout.css';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { AppBar, Navigation } from '@skeletonlabs/skeleton-svelte';
 	import {
+		HomeIcon,
 		KanbanIcon,
 		UserIcon,
 		SettingsIcon,
@@ -18,6 +20,7 @@
 	let sidebarCollapsed = $state(false);
 
 	const navLinks = [
+		{ label: 'Home', href: '/', icon: HomeIcon },
 		{ label: 'Roadmap', href: '/applications', icon: KanbanIcon },
 		{ label: 'Profiles', href: '/profiles', icon: UserIcon },
 		{ label: 'Resume', href: '/resume', icon: FileTextIcon },
@@ -28,8 +31,11 @@
 	const currentPath = $derived($page.url.pathname);
 
 	function isActive(href: string): boolean {
+		if (href === '/') {
+			return currentPath === '/';
+		}
 		if (href === '/applications') {
-			return currentPath === '/' || currentPath.startsWith('/applications');
+			return currentPath.startsWith('/applications');
 		}
 		return currentPath.startsWith(href);
 	}
@@ -55,8 +61,8 @@
 					</button>
 				</AppBar.Lead>
 				<AppBar.Headline>
-					<a href="/applications" class="flex items-center gap-2">
-						<img src="/favicon-32x32.png" alt="HuntOS" class="size-6" />
+					<a href={resolve('/')} class="flex items-center gap-2 text-current">
+						<img src="/logo.svg" alt="" class="size-6" />
 						<span class="text-xl font-bold">HuntOS</span>
 					</a>
 				</AppBar.Headline>

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="static/logo.svg" alt="HuntOS" width="160" height="160" />
+  <img src="static/logo-full.svg" alt="HuntOS" width="160" height="160" />
 </p>
 
 <h1 align="center">HuntOS</h1>
