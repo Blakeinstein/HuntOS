@@ -31,36 +31,36 @@ interface ElementControl {
 // Placeholder implementation
 class DummyBrowser implements BrowserControl {
 	async visit(url: string) {
-		console.log(`Navigating to ${url}`);
+		console.log(`[BrowserAgent] Navigating to ${url}`);
 	}
 	async fill(selector: string, value: string) {
-		console.log(`Filling ${selector} with "${value}"`);
+		console.log(`[BrowserAgent] Filling ${selector} with "${value}"`);
 	}
 	async click(selector: string) {
-		console.log(`Clicking ${selector}`);
+		console.log(`[BrowserAgent] Clicking ${selector}`);
 	}
 	async exists(selector: string) {
-		console.log(`Checking existence of ${selector}`);
+		console.log(`[BrowserAgent] Checking existence of ${selector}`);
 		return true;
 	}
 	async findAll(selector: string): Promise<ElementControl[]> {
-		console.log(`Finding all ${selector}`);
+		console.log(`[BrowserAgent] Finding all ${selector}`);
 		return [];
 	}
 	async find(selector: string): Promise<ElementControl | null> {
-		console.log(`Finding ${selector}`);
+		console.log(`[BrowserAgent] Finding ${selector}`);
 		return null;
 	}
 	async screenshot(): Promise<string> {
-		console.log('Taking screenshot');
+		console.log('[BrowserAgent] Taking screenshot');
 		return 'base64-encoded-image-data';
 	}
 	async eval<T>(script: string): Promise<T> {
-		console.log(`Evaluating script: ${script}`);
+		console.log(`[BrowserAgent] Evaluating script: ${script}`);
 		return '' as any;
 	}
 	async close() {
-		console.log('Closing browser');
+		console.log('[BrowserAgent] Closing browser');
 	}
 }
 
@@ -107,7 +107,7 @@ export class BrowserAgentService {
 		// In a real implementation, you would launch Playwright/Puppeteer here.
 		// this.browser = await chromium.launch({ headless });
 		this.browser = new DummyBrowser();
-		console.log(`Browser launched (headless: ${headless})`);
+		console.log(`[BrowserAgent] Browser launched (headless: ${headless})`);
 	}
 
 	/**
@@ -139,7 +139,7 @@ export class BrowserAgentService {
 			await this.browser.fill(selector, value);
 			return true;
 		} catch (error) {
-			console.error(`Failed to fill field ${selector}:`, error);
+			console.error(`[BrowserAgent] Failed to fill field ${selector}:`, error);
 			return false;
 		}
 	}
@@ -163,7 +163,7 @@ export class BrowserAgentService {
 					await this.browser.click(selector);
 					return true;
 				} catch (error) {
-					console.error(`Failed to click submit button ${selector}:`, error);
+					console.error(`[BrowserAgent] Failed to click submit button ${selector}:`, error);
 				}
 			}
 		}
@@ -220,7 +220,7 @@ export class BrowserAgentService {
 
 			// Placeholder for resume upload logic
 			if (await this.browser?.exists('input[type="file"][name*="resume"]')) {
-				console.log('Resume upload field found. Logic not implemented.');
+				console.log('[BrowserAgent] Resume upload field found. Logic not implemented.');
 			}
 
 			result.missingFields = await this.identifyMissingFields();

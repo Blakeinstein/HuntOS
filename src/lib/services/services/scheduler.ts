@@ -12,7 +12,8 @@
 // Call `reconfigure()` after changing settings to update cron patterns without restart.
 //
 // Persistence: file-based at data/cronbake-state.json so job state survives restarts.
-// Logging: all output goes to data/logs/scheduler.log via schedulerLogger.
+// Logging: tagged [scheduler] lines written to stdout via schedulerLogger; captured
+//          by the dev server tee into data/logs/dev.log and filterable in the admin panel.
 // Audit: each job run creates audit log entries for observability.
 
 import Baker, { FilePersistenceProvider } from 'cronbake';

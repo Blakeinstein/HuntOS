@@ -1,17 +1,31 @@
 // src/lib/services/services/schedulerLogger.ts
-// File-based logger for the cronbake scheduler.
-// Writes structured log lines to data/logs/scheduler.log so the admin
-// panel can tail them via the existing SSE log streaming infrastructure.
-
-import { mkdirSync, appendFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-
-const LOG_PATH = resolve('data/logs/scheduler.log');
-
-// Ensure the directory exists on module load
-mkdirSync(dirname(LOG_PATH), { recursive: true });
+// Scheduler logger — writes tagged lines to stdout so they appear in the
+// dev server log (data/logs/dev.log via `tee`) alongside DB and general logs.
+//
+// Every line is prefixed with [scheduler] so the admin log viewer can
+// filter by source tag.
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+
+// ANSI colours — rendered natively by xterm.js in the admin log viewer
+const A = {
+	reset: '\x1b[0m',
+	bold: '\x1b[1m',
+	dim: '\x1b[2m',
+	gray: '\x1b[90m',
+	cyan: '\x1b[36m',
+	green: '\x1b[32m',
+	yellow: '\x1b[33m',
+	red: '\x1b[31m',
+	magenta: '\x1b[35m'
+} as const;
+
+const LEVEL_COLOR: Record<LogLevel, string> = {
+	DEBUG: A.gray,
+	INFO: A.cyan,
+	WARN: A.yellow,
+	ERROR: A.red
+};
 
 function timestamp(): string {
 	return new Date().toISOString();
@@ -23,23 +37,20 @@ function formatArgs(args: unknown[]): string {
 }
 
 function writeLine(level: LogLevel, msg: string, args: unknown[]): void {
-	const line = `[${timestamp()}] [${level}] ${msg}${formatArgs(args)}\n`;
-	try {
-		appendFileSync(LOG_PATH, line);
-	} catch {
-		// If we can't write to the log file, fall back to console
-		console.error(`[scheduler-logger] Failed to write to ${LOG_PATH}`);
-	}
+	const levelColor = LEVEL_COLOR[level];
+	const tag = `${A.bold}${A.magenta}[scheduler]${A.reset}`;
+	const lvl = `${levelColor}${A.bold}${level}${A.reset}`;
+	const ts = `${A.dim}${timestamp()}${A.reset}`;
+	const text = `${msg}${formatArgs(args)}`;
+
+	process.stdout.write(`${tag} ${ts} ${lvl} ${text}\n`);
 }
 
 /**
- * Logger that implements cronbake's Logger interface and writes to
- * data/logs/scheduler.log. Each line is formatted as:
- *
- *   [ISO_TIMESTAMP] [LEVEL] message ...args
- *
- * The admin panel's SSE log endpoint can tail this file just like
- * dev.log and chrome.log.
+ * Logger that implements cronbake's Logger interface and writes tagged lines
+ * to stdout. The dev server captures stdout via `tee data/logs/dev.log`, so
+ * all scheduler output appears there and can be filtered by the [scheduler]
+ * tag in the admin log viewer.
  */
 export const schedulerLogger = {
 	debug(msg: string, ...args: unknown[]): void {
@@ -55,5 +66,3 @@ export const schedulerLogger = {
 		writeLine('ERROR', msg, args);
 	}
 };
-
-export { LOG_PATH as SCHEDULER_LOG_PATH };

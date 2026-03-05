@@ -167,7 +167,7 @@ export class ProfileService {
 		const updated: ProfileKey[] = [];
 		for (const { key, value } of updates) {
 			if (!this.isValidProfileKey(key)) {
-				console.warn(`Skipping invalid profile key: ${key}`);
+				console.warn(`[Profile] Skipping invalid profile key: ${key}`);
 				continue;
 			}
 			await this.updateProfile(key, value);
@@ -216,7 +216,10 @@ export class ProfileService {
 	async analyzeJobDescription(jobDescription: string): Promise<ProfileMatchAnalysis> {
 		const profile = await this.getProfile();
 
-		console.log('Analyzing job description (placeholder):', jobDescription.substring(0, 100));
+		console.log(
+			'[Profile] Analyzing job description (placeholder):',
+			jobDescription.substring(0, 100)
+		);
 
 		return {
 			profile,
@@ -231,7 +234,7 @@ export class ProfileService {
 	 */
 	async suggestProfileUpdates(jobDescription: string): Promise<ProfileUpdateSuggestion[]> {
 		console.log(
-			'Suggesting profile updates for job description (placeholder):',
+			'[Profile] Suggesting profile updates for job description (placeholder):',
 			jobDescription.substring(0, 100)
 		);
 		return [];
@@ -399,7 +402,7 @@ export class ProfileService {
 				if (this.isValidProfileKey(normalizedTopic)) {
 					await this.updateProfile(normalizedTopic, response);
 				} else {
-					console.warn(`Invalid profile key from LLM response: ${normalizedTopic}`);
+					console.warn(`[Profile] Invalid profile key from LLM response: ${normalizedTopic}`);
 				}
 				break;
 		}

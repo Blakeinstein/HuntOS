@@ -10,6 +10,8 @@
 	interface Props {
 		/** SSE source URL to connect to */
 		src: string;
+		/** Optional filter tag appended as ?filter=... — server-side filtering */
+		filter?: string;
 		/** Whether to auto-scroll to bottom on new output */
 		autoScroll?: boolean;
 		/** Reflects whether the SSE stream is open */
@@ -20,10 +22,18 @@
 
 	let {
 		src,
+		filter = 'all',
 		autoScroll = $bindable(true),
 		connected = $bindable(false),
 		reconnecting = $bindable(false)
 	}: Props = $props();
+
+	function buildUrl(base: string, f: string): string {
+		const u = new URL(base, 'http://x');
+		if (f && f !== 'all') u.searchParams.set('filter', f);
+		else u.searchParams.delete('filter');
+		return u.pathname + (u.search ? u.search : '');
+	}
 
 	const options: ITerminalOptions & ITerminalInitOnlyOptions = {
 		theme: {
@@ -77,7 +87,7 @@
 			new ResizeObserver(() => FitAddon.fit()).observe(el);
 		}
 
-		openEventSource(src);
+		openEventSource(buildUrl(src, filter));
 	}
 
 	function openEventSource(url: string) {
@@ -115,7 +125,12 @@
 		};
 	}
 
-	export function connect(url: string = src) {
+	/**
+	 * Tear down the current stream and open a new one at the given URL.
+	 * Does NOT touch connected/reconnecting — the new EventSource callbacks
+	 * will update those once the handshake completes, avoiding status flicker.
+	 */
+	function reconnectTo(url: string) {
 		if (retryTimer) {
 			clearTimeout(retryTimer);
 			retryTimer = null;
@@ -124,11 +139,14 @@
 			es.close();
 			es = null;
 		}
-		connected = false;
-		reconnecting = false;
 		retryCount = 0;
 		terminal?.clear();
 		openEventSource(url);
+	}
+
+	/** Public API: reconnect to an explicit URL (or the current src+filter). */
+	export function connect(url?: string) {
+		reconnectTo(url ?? buildUrl(src, filter));
 	}
 
 	export function clear() {
@@ -139,10 +157,13 @@
 		terminal?.scrollToBottom();
 	}
 
-	// Reconnect when src prop changes (source selector switch)
+	// Reconnect when src or filter prop changes.
+	// Using untrack on the previous value would be cleaner, but simply
+	// checking that the terminal is ready is enough — onLoad handles the
+	// initial connection so this only fires on subsequent changes.
 	$effect(() => {
-		const url = src;
-		if (terminal) connect(url);
+		const url = buildUrl(src, filter);
+		if (terminal) reconnectTo(url);
 	});
 
 	onDestroy(() => {

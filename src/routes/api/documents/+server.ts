@@ -45,7 +45,10 @@ export const POST: RequestHandler = async ({ request }) => {
 			const file = formData.get('file');
 
 			if (!file || !(file instanceof File)) {
-				return json({ error: 'No file provided. Include a "file" field in the form data.' }, { status: 400 });
+				return json(
+					{ error: 'No file provided. Include a "file" field in the form data.' },
+					{ status: 400 }
+				);
 			}
 
 			filename = file.name || 'untitled';
@@ -84,7 +87,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json(document, { status: 201 });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to upload document';
-		console.error('Document upload error:', error);
+		console.error('[api/documents] Document upload error:', error);
 		return json({ error: message }, { status: 500 });
 	}
 };

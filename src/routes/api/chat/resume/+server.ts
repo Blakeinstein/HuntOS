@@ -39,7 +39,7 @@ export const GET: RequestHandler = async () => {
 			resourceId: RESOURCE_ID
 		});
 	} catch {
-		console.log('No previous resume chat messages found.');
+		console.log('[api/chat/resume] No previous resume chat messages found.');
 	}
 
 	const uiMessages = toAISdkV5Messages(response?.messages || []);

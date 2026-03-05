@@ -353,7 +353,11 @@ export class JobBoardService {
 	 */
 	parseJobPosting(url: string, html: string): JobPosting | null {
 		// TODO: Implement HTML parsing logic
-		console.log('Parsing job posting from URL (placeholder):', url, html.substring(0, 100));
+		console.log(
+			'[JobBoard] Parsing job posting from URL (placeholder):',
+			url,
+			html.substring(0, 100)
+		);
 		return null;
 	}
 

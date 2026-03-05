@@ -158,11 +158,11 @@ export class EmailMonitorService {
 
 		// This is a placeholder for a real IMAP client instantiation
 		const client: SimpleImapClient = {
-			connect: async () => console.log('Connecting to IMAP...'),
-			end: async () => console.log('Disconnecting from IMAP...'),
-			openBox: async (box: string) => console.log(`Opening box ${box}...`),
+			connect: async () => console.log('[EmailMonitor] Connecting to IMAP...'),
+			end: async () => console.log('[EmailMonitor] Disconnecting from IMAP...'),
+			openBox: async (box: string) => console.log(`[EmailMonitor] Opening box ${box}...`),
 			search: async () => {
-				console.log('Searching emails...');
+				console.log('[EmailMonitor] Searching emails...');
 				return [];
 			}
 		};
@@ -208,7 +208,7 @@ export class EmailMonitorService {
 		client: SimpleImapClient
 	): Promise<EmailMessage[]> {
 		// Placeholder implementation
-		console.log(`Fetching unread messages for account ${accountId}`);
+		console.log(`[EmailMonitor] Fetching unread messages for account ${accountId}`);
 		return [];
 	}
 

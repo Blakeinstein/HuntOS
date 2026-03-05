@@ -78,7 +78,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to process resource';
-		console.error('User resource error:', error);
+		console.error('[api/user-resources] User resource error:', error);
 		return json({ error: message }, { status: 500 });
 	}
 };

@@ -173,9 +173,11 @@
 	// LOGS TAB
 	// ─────────────────────────────────────────────────────────────────────────
 
-	type LogSource = 'dev' | 'chrome' | 'scheduler';
+	type LogSource = 'dev' | 'chrome';
+	type LogFilter = 'all' | 'db' | 'scheduler' | 'general';
 
 	let logSource = $state<LogSource>('dev');
+	let logFilter = $state<LogFilter>('all');
 	let logAutoScroll = $state(true);
 	let logTerminal = $state<LogTerminal | null>(null);
 	let logConnected = $state(false);
@@ -184,6 +186,13 @@
 	function logSrc(source: LogSource) {
 		return `/api/admin/logs?source=${source}`;
 	}
+
+	const LOG_FILTERS: { id: LogFilter; label: string }[] = [
+		{ id: 'all', label: 'All' },
+		{ id: 'db', label: '[db]' },
+		{ id: 'scheduler', label: '[scheduler]' },
+		{ id: 'general', label: 'General' }
+	];
 
 	// ─────────────────────────────────────────────────────────────────────────
 	// FILES TAB
@@ -626,7 +635,7 @@
 			<div class="flex flex-wrap items-center gap-3">
 				<!-- Source selector -->
 				<div class="flex gap-1 rounded-lg border border-surface-200-800 p-1">
-					{#each [{ id: 'dev' as LogSource, label: 'Dev Server' }, { id: 'chrome' as LogSource, label: 'Chrome' }, { id: 'scheduler' as LogSource, label: 'Scheduler' }] as src (src.id)}
+					{#each [{ id: 'dev' as LogSource, label: 'Dev Server' }, { id: 'chrome' as LogSource, label: 'Chrome' }] as src (src.id)}
 						<button
 							type="button"
 							class="rounded px-3 py-1 text-xs font-medium transition-colors
@@ -637,6 +646,22 @@
 						</button>
 					{/each}
 				</div>
+
+				<!-- Filter selector (only meaningful for dev source) -->
+				{#if logSource === 'dev'}
+					<div class="flex gap-1 rounded-lg border border-surface-200-800 p-1">
+						{#each LOG_FILTERS as f (f.id)}
+							<button
+								type="button"
+								class="rounded px-3 py-1 font-mono text-xs font-medium transition-colors
+									{logFilter === f.id ? 'preset-filled-surface-500' : 'hover:preset-tonal'}"
+								onclick={() => (logFilter = f.id)}
+							>
+								{f.label}
+							</button>
+						{/each}
+					</div>
+				{/if}
 
 				<!-- Status indicator -->
 				<div class="flex items-center gap-1.5 text-xs">
@@ -699,6 +724,7 @@
 				<LogTerminal
 					bind:this={logTerminal}
 					src={logSrc(logSource)}
+					filter={logSource === 'dev' ? logFilter : 'all'}
 					bind:autoScroll={logAutoScroll}
 					bind:connected={logConnected}
 					bind:reconnecting={logReconnecting}

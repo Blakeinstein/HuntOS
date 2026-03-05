@@ -1,6 +1,15 @@
 // src/routes/api/admin/logs/+server.ts
 // SSE endpoint that streams server log files to the admin panel in real time.
-// Supports tailing data/logs/dev.log, data/logs/chrome.log, or data/logs/scheduler.log.
+// Supports tailing data/logs/dev.log or data/logs/chrome.log.
+//
+// Filter tags in dev.log:
+//   [db]        — database query logs from dbLogger
+//   [scheduler] — scheduler job logs from schedulerLogger
+//   (none)      — general / untagged application logs
+//
+// Query params:
+//   source  — one of: dev | chrome  (default: dev)
+//   filter  — one of: all | db | scheduler | general  (default: all)
 
 import type { RequestHandler } from './$types';
 import { existsSync, statSync, openSync, readSync, closeSync } from 'fs';
@@ -8,13 +17,44 @@ import { resolve } from 'path';
 
 const LOG_FILES: Record<string, string> = {
 	dev: resolve('data/logs/dev.log'),
-	chrome: resolve('data/logs/chrome.log'),
-	scheduler: resolve('data/logs/scheduler.log')
+	chrome: resolve('data/logs/chrome.log')
 };
 
 const VALID_SOURCES = new Set(Object.keys(LOG_FILES));
+
+export type LogFilter = 'all' | 'db' | 'scheduler' | 'general';
+const VALID_FILTERS = new Set<LogFilter>(['all', 'db', 'scheduler', 'general']);
+
 const TAIL_LINES = 200; // lines to send on initial connection
 const POLL_INTERVAL_MS = 500;
+
+/**
+ * Returns true if a log line matches the requested filter.
+ *
+ * Tag detection is done on the raw line (which may contain ANSI escape codes).
+ * We strip ANSI before checking so the match is reliable regardless of colour.
+ */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+function lineMatchesFilter(line: string, filter: LogFilter): boolean {
+	if (filter === 'all') return true;
+
+	const plain = line.replace(ANSI_RE, '');
+
+	const hasDb = /\[db\]/i.test(plain);
+	const hasScheduler = /\[scheduler\]/i.test(plain);
+
+	switch (filter) {
+		case 'db':
+			return hasDb;
+		case 'scheduler':
+			return hasScheduler;
+		case 'general':
+			// General = no recognised source tag
+			return !hasDb && !hasScheduler;
+	}
+}
 
 /**
  * Read the last N lines from a file by scanning backwards from EOF.
@@ -40,7 +80,6 @@ function tailFile(filePath: string, lines: number): string {
 		readSync(fd, buf, 0, readSize, pos);
 		const chunk = buf.subarray(0, readSize).toString('utf8');
 		collected = chunk + collected;
-		// Count newlines
 		for (let i = 0; i < chunk.length; i++) {
 			if (chunk[i] === '\n') lineCount++;
 		}
@@ -49,7 +88,6 @@ function tailFile(filePath: string, lines: number): string {
 	closeSync(fd);
 
 	const allLines = collected.split('\n');
-	// If we read more than needed, trim from the front
 	if (allLines.length > lines + 1) {
 		return allLines.slice(allLines.length - lines - 1).join('\n');
 	}
@@ -57,15 +95,17 @@ function tailFile(filePath: string, lines: number): string {
 }
 
 /**
- * GET /api/admin/logs?source=dev
+ * GET /api/admin/logs?source=dev&filter=all
  * Opens an SSE stream. Sends the last TAIL_LINES on connect, then polls
  * for new content by tracking file size.
  *
  * Query params:
- *   source  — one of: dev | studio | chrome  (default: dev)
+ *   source  — one of: dev | chrome           (default: dev)
+ *   filter  — one of: all | db | scheduler | general  (default: all)
  */
 export const GET: RequestHandler = async ({ url, request }) => {
 	const source = url.searchParams.get('source') ?? 'dev';
+	const filterParam = (url.searchParams.get('filter') ?? 'all') as LogFilter;
 
 	if (!VALID_SOURCES.has(source)) {
 		return new Response(
@@ -74,6 +114,7 @@ export const GET: RequestHandler = async ({ url, request }) => {
 		);
 	}
 
+	const filter: LogFilter = VALID_FILTERS.has(filterParam) ? filterParam : 'all';
 	const filePath = LOG_FILES[source];
 
 	const stream = new ReadableStream({
@@ -92,11 +133,11 @@ export const GET: RequestHandler = async ({ url, request }) => {
 
 			function enqueueLines(text: string) {
 				if (!text) return;
-				// Split into individual lines and send each as a separate message
-				// so the client can append line-by-line.
 				const lines = text.split('\n');
 				for (const line of lines) {
-					enqueue('log', line);
+					if (lineMatchesFilter(line, filter)) {
+						enqueue('log', line);
+					}
 				}
 			}
 
@@ -115,7 +156,6 @@ export const GET: RequestHandler = async ({ url, request }) => {
 				}
 
 				if (!existsSync(filePath)) {
-					// File doesn't exist yet — nothing to tail
 					return;
 				}
 
