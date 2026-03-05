@@ -29,6 +29,26 @@ export interface AppSettingsMap {
 	audit_cleanup_enabled: string; // 'true' | 'false'
 	/** Cron pattern for audit-log cleanup (default: daily at 03:00). */
 	audit_cleanup_cron: string;
+
+	// ── Agent loop tuning ─────────────────────────────────────────
+	/**
+	 * Max browser/tool steps the agent may take in a single generate() call.
+	 * Lower = faster failure detection. Higher = more room to handle complex forms.
+	 * Default: 30
+	 */
+	agent_max_steps_per_iteration: string;
+	/**
+	 * Total step budget across ALL iterations in one application run.
+	 * The loop forces a final JSON-output attempt when this is exhausted.
+	 * Default: 80
+	 */
+	agent_total_step_budget: string;
+	/**
+	 * Maximum number of generate() calls (continuation iterations) per application.
+	 * Each iteration can continue where the previous one left off.
+	 * Default: 5
+	 */
+	agent_max_iterations: string;
 }
 
 /** Default values for all well-known settings. */
@@ -42,7 +62,12 @@ const DEFAULTS: AppSettingsMap = {
 	scraper_enabled: 'true',
 	email_sync_cron: '0 */30 * * * *',
 	audit_cleanup_enabled: 'false',
-	audit_cleanup_cron: '0 0 3 * * *'
+	audit_cleanup_cron: '0 0 3 * * *',
+
+	// Agent loop tuning defaults (match the hardcoded values in applyPipelineExecutor)
+	agent_max_steps_per_iteration: '30',
+	agent_total_step_budget: '80',
+	agent_max_iterations: '5'
 };
 
 // ── Service ──────────────────────────────────────────────────────
@@ -232,6 +257,47 @@ export class AppSettingsService {
 			emailSyncCron: this.emailSyncCron,
 			auditCleanupEnabled: this.auditCleanupEnabled,
 			auditCleanupCron: this.auditCleanupCron
+		};
+	}
+
+	// ── Agent loop tuning accessors ──────────────────────────────
+
+	/** Max browser/tool steps per generate() call. */
+	get agentMaxStepsPerIteration(): number {
+		return Math.max(1, parseInt(this.get('agent_max_steps_per_iteration'), 10) || 30);
+	}
+
+	set agentMaxStepsPerIteration(value: number) {
+		this.set('agent_max_steps_per_iteration', String(Math.max(1, Math.floor(value))));
+	}
+
+	/** Total step budget across all iterations for one application run. */
+	get agentTotalStepBudget(): number {
+		return Math.max(1, parseInt(this.get('agent_total_step_budget'), 10) || 80);
+	}
+
+	set agentTotalStepBudget(value: number) {
+		this.set('agent_total_step_budget', String(Math.max(1, Math.floor(value))));
+	}
+
+	/** Maximum number of continuation iterations per application run. */
+	get agentMaxIterations(): number {
+		return Math.max(1, parseInt(this.get('agent_max_iterations'), 10) || 5);
+	}
+
+	set agentMaxIterations(value: number) {
+		this.set('agent_max_iterations', String(Math.max(1, Math.floor(value))));
+	}
+
+	/**
+	 * Get all agent loop tuning settings as a typed object.
+	 * Useful for the automation settings UI.
+	 */
+	getAgentSettings() {
+		return {
+			agentMaxStepsPerIteration: this.agentMaxStepsPerIteration,
+			agentTotalStepBudget: this.agentTotalStepBudget,
+			agentMaxIterations: this.agentMaxIterations
 		};
 	}
 }

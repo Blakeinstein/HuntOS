@@ -26,11 +26,12 @@ export const GET: RequestHandler = async () => {
 
 	try {
 		const settings = appSettingsService.getSchedulerSettings();
+		const agentSettings = appSettingsService.getAgentSettings();
 		const jobs = schedulerService.getAllJobStatuses();
 		const initialized = schedulerService.isInitialized();
 
 		return json({
-			settings,
+			settings: { ...settings, ...agentSettings },
 			scheduler: {
 				initialized,
 				jobs
@@ -121,6 +122,39 @@ export const PUT: RequestHandler = async ({ request }) => {
 		}
 	}
 
+	// ── agent_max_steps_per_iteration ────────────────────────────
+	if ('agentMaxStepsPerIteration' in body) {
+		const val = Number(body.agentMaxStepsPerIteration);
+		if (!Number.isInteger(val) || val < 1 || val > 200) {
+			errors.push('"agentMaxStepsPerIteration" must be an integer between 1 and 200');
+		} else {
+			appSettingsService.agentMaxStepsPerIteration = val;
+			updated.agentMaxStepsPerIteration = val;
+		}
+	}
+
+	// ── agent_total_step_budget ──────────────────────────────────
+	if ('agentTotalStepBudget' in body) {
+		const val = Number(body.agentTotalStepBudget);
+		if (!Number.isInteger(val) || val < 1 || val > 500) {
+			errors.push('"agentTotalStepBudget" must be an integer between 1 and 500');
+		} else {
+			appSettingsService.agentTotalStepBudget = val;
+			updated.agentTotalStepBudget = val;
+		}
+	}
+
+	// ── agent_max_iterations ─────────────────────────────────────
+	if ('agentMaxIterations' in body) {
+		const val = Number(body.agentMaxIterations);
+		if (!Number.isInteger(val) || val < 1 || val > 20) {
+			errors.push('"agentMaxIterations" must be an integer between 1 and 20');
+		} else {
+			appSettingsService.agentMaxIterations = val;
+			updated.agentMaxIterations = val;
+		}
+	}
+
 	// If nothing was valid, bail
 	if (errors.length > 0 && Object.keys(updated).length === 0) {
 		return json({ error: 'No settings were updated', errors }, { status: 400 });
@@ -143,7 +177,10 @@ export const PUT: RequestHandler = async ({ request }) => {
 	}
 
 	// Return the updated settings + reconfigure summary
-	const settings = appSettingsService.getSchedulerSettings();
+	const settings = {
+		...appSettingsService.getSchedulerSettings(),
+		...appSettingsService.getAgentSettings()
+	};
 
 	return json({
 		updated,

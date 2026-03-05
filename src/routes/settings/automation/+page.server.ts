@@ -11,7 +11,10 @@ export const load: PageServerLoad = async ({ fetch }) => {
 			scraperEnabled: true,
 			emailSyncCron: '0 */30 * * * *',
 			auditCleanupEnabled: false,
-			auditCleanupCron: '0 0 3 * * *'
+			auditCleanupCron: '0 0 3 * * *',
+			agentMaxStepsPerIteration: 30,
+			agentTotalStepBudget: 80,
+			agentMaxIterations: 5
 		},
 		scheduler: data.scheduler ?? {
 			initialized: false,

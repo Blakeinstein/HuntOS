@@ -14,7 +14,11 @@
 		InfoIcon,
 		SettingsIcon,
 		ActivityIcon,
-		ChevronRightIcon
+		ChevronRightIcon,
+		SlidersHorizontalIcon,
+		ZapIcon,
+		LayersIcon,
+		RepeatIcon
 	} from '@lucide/svelte';
 
 	let { data } = $props();
@@ -34,6 +38,9 @@
 	let _scraperEnabled = $state<boolean | null>(null);
 	let _auditCleanupEnabled = $state<boolean | null>(null);
 	let _auditCleanupCron = $state<string | null>(null);
+	let _agentMaxStepsPerIteration = $state<number | null>(null);
+	let _agentTotalStepBudget = $state<number | null>(null);
+	let _agentMaxIterations = $state<number | null>(null);
 
 	// Effective form values: local override ?? server value
 	let autoApplyEnabled = $derived(_autoApplyEnabled ?? serverSettings.autoApplyEnabled);
@@ -41,6 +48,11 @@
 	let scraperEnabled = $derived(_scraperEnabled ?? serverSettings.scraperEnabled);
 	let auditCleanupEnabled = $derived(_auditCleanupEnabled ?? serverSettings.auditCleanupEnabled);
 	let auditCleanupCron = $derived(_auditCleanupCron ?? serverSettings.auditCleanupCron);
+	let agentMaxStepsPerIteration = $derived(
+		_agentMaxStepsPerIteration ?? serverSettings.agentMaxStepsPerIteration
+	);
+	let agentTotalStepBudget = $derived(_agentTotalStepBudget ?? serverSettings.agentTotalStepBudget);
+	let agentMaxIterations = $derived(_agentMaxIterations ?? serverSettings.agentMaxIterations);
 
 	let isSaving = $state(false);
 	let saveResult = $state<{ ok: boolean; message: string } | null>(null);
@@ -53,7 +65,10 @@
 			_autoApplyCron !== null ||
 			_scraperEnabled !== null ||
 			_auditCleanupEnabled !== null ||
-			_auditCleanupCron !== null
+			_auditCleanupCron !== null ||
+			_agentMaxStepsPerIteration !== null ||
+			_agentTotalStepBudget !== null ||
+			_agentMaxIterations !== null
 	);
 
 	/** Clear all local overrides (resets form to server state). */
@@ -63,6 +78,9 @@
 		_scraperEnabled = null;
 		_auditCleanupEnabled = null;
 		_auditCleanupCron = null;
+		_agentMaxStepsPerIteration = null;
+		_agentTotalStepBudget = null;
+		_agentMaxIterations = null;
 	}
 
 	// ── Cron presets ────────────────────────────────────────────────
@@ -98,7 +116,10 @@
 					autoApplyCron: autoApplyCron.trim(),
 					scraperEnabled,
 					auditCleanupEnabled,
-					auditCleanupCron: auditCleanupCron.trim()
+					auditCleanupCron: auditCleanupCron.trim(),
+					agentMaxStepsPerIteration,
+					agentTotalStepBudget,
+					agentMaxIterations
 				})
 			});
 
@@ -394,6 +415,126 @@
 					)}
 				</p>
 			</label>
+		</div>
+	</div>
+
+	<!-- ═══════════════════════════════════════════════════════════════
+	     AGENT BEHAVIOR
+	     ═══════════════════════════════════════════════════════════════ -->
+	<div class="card border border-surface-200-800 bg-surface-50-950 p-5">
+		<div class="mb-4 flex items-center gap-2">
+			<SlidersHorizontalIcon class="size-4 text-tertiary-500" />
+			<h2 class="text-sm font-bold">Agent Behavior</h2>
+		</div>
+
+		<div
+			class="mb-5 flex items-start gap-2 rounded-lg border border-tertiary-500/20 bg-tertiary-500/5 p-3"
+		>
+			<InfoIcon class="mt-0.5 size-4 shrink-0 text-tertiary-500" />
+			<p class="text-xs opacity-70">
+				These settings control how much work the browser agent is allowed to do when filling out a
+				single job application. The agent runs in a loop — each <strong>iteration</strong> is one
+				call to the LLM that can take up to <strong>Steps per Iteration</strong> browser actions. The
+				loop continues until the agent returns a result, runs out of steps, or hits the iteration cap.
+				Higher values let the agent handle longer, more complex forms but increase cost and runtime per
+				application.
+			</p>
+		</div>
+
+		<div class="space-y-5">
+			<!-- Steps per iteration -->
+			<div>
+				<label class="label" for="agent-steps-per-iter">
+					<span class="flex items-center gap-1.5 text-sm font-medium">
+						<ZapIcon class="size-3.5 opacity-50" />
+						Steps per Iteration
+					</span>
+				</label>
+				<div class="mt-1 flex items-center gap-3">
+					<input
+						id="agent-steps-per-iter"
+						type="number"
+						class="input w-28"
+						min="1"
+						max="200"
+						step="5"
+						value={agentMaxStepsPerIteration}
+						oninput={(e) => {
+							const v = parseInt(e.currentTarget.value, 10);
+							if (!isNaN(v)) _agentMaxStepsPerIteration = v;
+						}}
+					/>
+					<span class="text-xs opacity-50">Default: 30 &nbsp;·&nbsp; Range: 1–200</span>
+				</div>
+				<p class="mt-1 text-xs opacity-40">
+					Maximum number of browser tool calls (click, fill, screenshot, etc.) the agent may make in
+					a single LLM call. Increase this for sites with very long multi-step forms.
+				</p>
+			</div>
+
+			<!-- Total step budget -->
+			<div>
+				<label class="label" for="agent-step-budget">
+					<span class="flex items-center gap-1.5 text-sm font-medium">
+						<LayersIcon class="size-3.5 opacity-50" />
+						Total Step Budget
+					</span>
+				</label>
+				<div class="mt-1 flex items-center gap-3">
+					<input
+						id="agent-step-budget"
+						type="number"
+						class="input w-28"
+						min="1"
+						max="500"
+						step="10"
+						value={agentTotalStepBudget}
+						oninput={(e) => {
+							const v = parseInt(e.currentTarget.value, 10);
+							if (!isNaN(v)) _agentTotalStepBudget = v;
+						}}
+					/>
+					<span class="text-xs opacity-50">Default: 80 &nbsp;·&nbsp; Range: 1–500</span>
+				</div>
+				<p class="mt-1 text-xs opacity-40">
+					Hard cap on total browser steps across all iterations for one application run. When this
+					is exhausted the agent is forced to return its final result immediately, even if it hasn't
+					finished filling the form. Should be at least <em>Steps per Iteration × Max Iterations</em
+					>.
+				</p>
+			</div>
+
+			<!-- Max iterations -->
+			<div>
+				<label class="label" for="agent-max-iter">
+					<span class="flex items-center gap-1.5 text-sm font-medium">
+						<RepeatIcon class="size-3.5 opacity-50" />
+						Max Iterations
+					</span>
+				</label>
+				<div class="mt-1 flex items-center gap-3">
+					<input
+						id="agent-max-iter"
+						type="number"
+						class="input w-28"
+						min="1"
+						max="20"
+						step="1"
+						value={agentMaxIterations}
+						oninput={(e) => {
+							const v = parseInt(e.currentTarget.value, 10);
+							if (!isNaN(v)) _agentMaxIterations = v;
+						}}
+					/>
+					<span class="text-xs opacity-50">Default: 5 &nbsp;·&nbsp; Range: 1–20</span>
+				</div>
+				<p class="mt-1 text-xs opacity-40">
+					How many times the agent may be re-prompted to continue if it stops before producing a
+					result. Each continuation gives the agent a fresh LLM call with its conversation history
+					intact so it can pick up exactly where it left off. Increase this if the agent
+					consistently runs out of iterations on complex applications.
+				</p>
+			</div>
 		</div>
 	</div>
 

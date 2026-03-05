@@ -1355,9 +1355,9 @@ export class ApplyPipelineExecutor {
 					initialMessage: userMessage,
 					requestContext,
 					schema: applicationResultSchema,
-					maxStepsPerIteration: 30,
-					totalStepBudget: 80,
-					maxIterations: 5,
+					maxStepsPerIteration: this.appSettingsService.agentMaxStepsPerIteration,
+					totalStepBudget: this.appSettingsService.agentTotalStepBudget,
+					maxIterations: this.appSettingsService.agentMaxIterations,
 					onBeforeIteration: (iteration, totalStepsSoFar) => {
 						this.checkCancelled(runId);
 						this.log(
