@@ -20,8 +20,8 @@ Greenhouse is one of the most common Applicant Tracking Systems. Its application
 
 After navigating and taking a snapshot, check for these Greenhouse-specific conditions:
 
-- **Embedded iframe:** If the Greenhouse form is embedded in a company's custom career page via an `<iframe>`, call `browser-frame-switch` with `selector: "iframe#grnhse_iframe"` (or `"iframe[src*='greenhouse.io']"`, `"iframe[title*='Greenhouse']"`). Then call `browser-snapshot` to see the form fields inside the frame.
-- **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser-find-text { text: "Accept", action: "click" }` or `browser-find-role { role: "button", name: "Close", action: "click" }`. Re-take `browser-snapshot`.
+- **Embedded iframe:** If the Greenhouse form is embedded in a company's custom career page via an `<iframe>`, call `browser-frame-switch` with `selector: "iframe#grnhse_iframe"` (or `"iframe[src*='greenhouse.io']"`, `"iframe[title*='Greenhouse']"`). Then call `browser_snapshot` to see the form fields inside the frame.
+- **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser_find_text { text: "Accept", action: "click" }` or `browser_find_role { role: "button", name: "Close", action: "click" }`. Re-take `browser_snapshot`.
 - **"No longer accepting applications":** If the page shows "This job is no longer accepting applications", "Position filled", "Job closed", or a similar closed-position message, STOP. Return `success: false`, `end_reason: "closed"`, and `end_reason_description` explaining the specific reason (e.g., "The job posting is no longer accepting applications").
 - **404 or error page:** If the page shows a 404, "Job not found", or server error, STOP. Return `success: false`, `end_reason: "error"`, and `end_reason_description` explaining the issue.
 - **Login/authentication wall:** Greenhouse forms are almost never gated behind login. However, some companies configure their Greenhouse instance to require sign-in. If **the snapshot shows** a login form or authentication wall, **do NOT immediately block** — first inspect the page for SSO buttons (LinkedIn, Google, Microsoft). Follow the **SSO / Social Login Handling** steps in Step 2a of the base instructions. Only return `blocked: true` with `blocked_reason: "Authentication required"` if no SSO option is available or all SSO attempts fail.
@@ -36,34 +36,34 @@ Greenhouse application pages have a standard layout. The form is typically:
 3. Structured in sections: Personal Information → Resume/Cover Letter → Custom Questions → EEOC (optional) → Submit.
 
 Locate the form element. If the form is not immediately visible:
-- Call `browser-scroll { direction: "down", pixels: 500 }` — the form may be below a lengthy job description.
-- Use `browser-find-text { text: "Apply for this job", action: "text" }` to locate the section.
-- If an "Apply" button is needed to reveal the form, use `browser-find-role { role: "button", name: "Apply", action: "click" }`.
+- Call `browser_scroll { direction: "down", pixels: 500 }` — the form may be below a lengthy job description.
+- Use `browser_find_text { text: "Apply for this job", action: "text" }` to locate the section.
+- If an "Apply" button is needed to reveal the form, use `browser_find_role { role: "button", name: "Apply", action: "click" }`.
 
-Take a `browser-snapshot` once you have the form in view.
+Take a `browser_snapshot` once you have the form in view.
 
 ### Filling Personal Information Fields
 
-The personal info section typically appears first. Greenhouse uses consistent field naming. Use `browser-find-label` for efficient filling, or fall back to `browser-fill` with CSS selectors/snapshot refs:
+The personal info section typically appears first. Greenhouse uses consistent field naming. Use `browser_find_label` for efficient filling, or fall back to `browser_fill` with CSS selectors/snapshot refs:
 
 | Field | Selector Patterns | Fill Approach | Profile Key |
 |-------|------------------|---------------|-------------|
-| First Name | `#first_name`, `input[name="job_application[first_name]"]` | `browser-find-label { label: "First Name", action: "fill", value: "..." }` | `name` (first part) |
-| Last Name | `#last_name`, `input[name="job_application[last_name]"]` | `browser-find-label { label: "Last Name", action: "fill", value: "..." }` | `name` (remaining parts) |
-| Email | `#email`, `input[name="job_application[email]"]` | `browser-find-label { label: "Email", action: "fill", value: "..." }` | `email` |
-| Phone | `#phone`, `input[name="job_application[phone]"]` | `browser-find-label { label: "Phone", action: "fill", value: "..." }` | `phone` |
-| Location | `#job_application_location` | `browser-fill { selector: "#job_application_location", text: "..." }` | `location` |
-| LinkedIn URL | `input[name*="linkedin"]`, label containing "LinkedIn" | `browser-find-label { label: "LinkedIn", action: "fill", value: "..." }` | `linkedin_url` |
-| Website / Portfolio | `input[name*="website"]` | `browser-find-label { label: "Website", action: "fill", value: "..." }` | `portfolio_url` |
-| Current Company | `input[name*="current_company"]` | `browser-find-label { label: "Current Company", action: "fill", value: "..." }` | Most recent experience |
-| Current Title | `input[name*="current_title"]` | `browser-find-label { label: "Current Title", action: "fill", value: "..." }` | Most recent experience or `job_titles` |
+| First Name | `#first_name`, `input[name="job_application[first_name]"]` | `browser_find_label { label: "First Name", action: "fill", value: "..." }` | `name` (first part) |
+| Last Name | `#last_name`, `input[name="job_application[last_name]"]` | `browser_find_label { label: "Last Name", action: "fill", value: "..." }` | `name` (remaining parts) |
+| Email | `#email`, `input[name="job_application[email]"]` | `browser_find_label { label: "Email", action: "fill", value: "..." }` | `email` |
+| Phone | `#phone`, `input[name="job_application[phone]"]` | `browser_find_label { label: "Phone", action: "fill", value: "..." }` | `phone` |
+| Location | `#job_application_location` | `browser_fill { selector: "#job_application_location", text: "..." }` | `location` |
+| LinkedIn URL | `input[name*="linkedin"]`, label containing "LinkedIn" | `browser_find_label { label: "LinkedIn", action: "fill", value: "..." }` | `linkedin_url` |
+| Website / Portfolio | `input[name*="website"]` | `browser_find_label { label: "Website", action: "fill", value: "..." }` | `portfolio_url` |
+| Current Company | `input[name*="current_company"]` | `browser_find_label { label: "Current Company", action: "fill", value: "..." }` | Most recent experience |
+| Current Title | `input[name*="current_title"]` | `browser_find_label { label: "Current Title", action: "fill", value: "..." }` | Most recent experience or `job_titles` |
 
 **Location autocomplete handling:** Greenhouse's location field often uses Google Places autocomplete. After filling:
-1. Call `browser-fill { selector: "#job_application_location", text: "City, State" }`.
-2. Call `browser-wait-time { ms: 1000 }` for the autocomplete dropdown to appear.
-3. Call `browser-snapshot` to look for a suggestion list (`.pac-container`, `ul[role="listbox"]`).
-4. Call `browser-click` on the first matching suggestion (e.g. `browser-find-first { selector: ".pac-item", action: "click" }`).
-5. If no autocomplete appears, the value may have been accepted as-is — verify with `browser-get-value { selector: "#job_application_location" }`.
+1. Call `browser_fill { selector: "#job_application_location", text: "City, State" }`.
+2. Call `browser_wait_time { ms: 1000 }` for the autocomplete dropdown to appear.
+3. Call `browser_snapshot` to look for a suggestion list (`.pac-container`, `ul[role="listbox"]`).
+4. Call `browser_click` on the first matching suggestion (e.g. `browser_find_first { selector: ".pac-item", action: "click" }`).
+5. If no autocomplete appears, the value may have been accepted as-is — verify with `browser_get_value { selector: "#job_application_location" }`.
 
 ### Resume and Cover Letter Upload
 
@@ -71,15 +71,15 @@ The resume/cover letter section appears after personal information.
 
 #### Resume Upload
 
-1. Locate the resume upload area using `browser-snapshot`. Look for:
+1. Locate the resume upload area using `browser_snapshot`. Look for:
    - `input[type="file"]#resume`, `input[name="job_application[resume]"]`
    - A `<div>` with text "Attach" or "Drop" containing a hidden file input
    - A link/button with text "Attach Resume/CV" that reveals the file input
    - A wrapper with class `.field` containing label text "Resume/CV"
-2. If a clickable "Attach" or "Choose file" link exists, click it first: `browser-find-text { text: "Attach", action: "click" }` to surface the file input.
-3. If Resume File Path is not empty, call `browser-fill { selector: "input[type='file']#resume", text: "<Resume File Path>" }`.
+2. If a clickable "Attach" or "Choose file" link exists, click it first: `browser_find_text { text: "Attach", action: "click" }` to surface the file input.
+3. If Resume File Path is not empty, call `browser_fill { selector: "input[type='file']#resume", text: "<Resume File Path>" }`.
 4. If Resume File Path is empty, record the field as `missing` if resume upload is required.
-5. After uploading, call `browser-snapshot` to verify the filename appears in the upload confirmation area (`.uploaded-filename` or similar).
+5. After uploading, call `browser_snapshot` to verify the filename appears in the upload confirmation area (`.uploaded-filename` or similar).
 
 #### Cover Letter
 
@@ -88,7 +88,7 @@ The resume/cover letter section appears after personal information.
    - A `<textarea>` with label "Cover Letter"
    - A wrapper with text "Cover Letter"
 2. If it's a **file upload** and no cover letter file is available, skip it (almost always optional).
-3. If it's a **text area**, use `browser-fill` on the textarea element. Generate a brief cover letter (3-4 paragraphs) using the Job Description and Resume Data:
+3. If it's a **text area**, use `browser_fill` on the textarea element. Generate a brief cover letter (3-4 paragraphs) using the Job Description and Resume Data:
    - Paragraph 1: Express interest in the specific role and company (use the company name from the page).
    - Paragraph 2: Highlight 2-3 relevant qualifications or experiences from the Resume Data that match the Job Description.
    - Paragraph 3: Mention alignment with the company's mission or values if evident from the Job Description.
@@ -103,32 +103,32 @@ Scroll down to ensure all custom questions are visible, then handle each by type
 
 #### Text Input Questions
 - Single-line text fields (`<input type="text">`).
-- Use `browser-fill` with the snapshot ref and the appropriate answer from Job Description / User Profile.
+- Use `browser_fill` with the snapshot ref and the appropriate answer from Job Description / User Profile.
 - Common examples: "How did you hear about this role?", "What is your GitHub username?", "Please provide your portfolio URL."
 
 #### Textarea Questions
 - Multi-line text fields (`<textarea>`).
 - These are open-ended questions — compose thoughtful answers (2-4 sentences) using Job Description and Resume Data.
-- Use `browser-fill` with the textarea ref to set the content.
+- Use `browser_fill` with the textarea ref to set the content.
 - Common examples: "Why are you interested in this role?", "Describe your experience with [technology]."
 
 #### Select / Dropdown Questions
 - `<select>` elements with predefined options.
-- First read all options with `browser-get-text` or `browser-get-html` on the `<select>` element.
+- First read all options with `browser_get_text` or `browser_get_html` on the `<select>` element.
 - Choose the most appropriate option based on the User Profile.
 - Common examples: "Years of experience", "Highest education level", "Preferred work arrangement".
-- Use `browser-select { selector: "@eN", value: "Option Text" }` with the matching option value.
+- Use `browser_select { selector: "@eN", value: "Option Text" }` with the matching option value.
 
 #### Checkbox Questions
 - `<input type="checkbox">` elements.
 - Typically "I agree to..." terms checkboxes or multi-select preferences.
-- For terms/conditions: `browser-check { selector: "@eN" }`.
-- For preference checkboxes: Use `browser-check` on options that match the User Profile.
+- For terms/conditions: `browser_check { selector: "@eN" }`.
+- For preference checkboxes: Use `browser_check` on options that match the User Profile.
 
 #### Radio Button Questions
 - `<input type="radio">` groups.
 - Read all option labels from the snapshot to understand the choices.
-- Use `browser-click { selector: "@eN" }` on the most appropriate radio option.
+- Use `browser_click { selector: "@eN" }` on the most appropriate radio option.
 - Common examples: "Are you authorized to work in [country]?", "Do you require sponsorship?"
 
 #### Yes/No Questions
@@ -153,10 +153,10 @@ US-based Greenhouse postings often include an Equal Employment Opportunity Commi
 - **Disability Status:** Select "I don't wish to answer" or "I do not wish to answer"
 
 For each, first read options then select the decline option:
-- `browser-get-text { selector: "select#job_application_gender" }` → then `browser-select { selector: "select#job_application_gender", value: "Decline to self-identify" }`
-- `browser-get-text { selector: "select#job_application_race" }` → then `browser-select { selector: "select#job_application_race", value: "Decline to self-identify" }`
-- `browser-get-text { selector: "select#job_application_veteran_status" }` → then `browser-select` with the decline option
-- `browser-get-text { selector: "select#job_application_disability_status" }` → then `browser-select` with the decline option
+- `browser_get_text { selector: "select#job_application_gender" }` → then `browser_select { selector: "select#job_application_gender", value: "Decline to self-identify" }`
+- `browser_get_text { selector: "select#job_application_race" }` → then `browser_select { selector: "select#job_application_race", value: "Decline to self-identify" }`
+- `browser_get_text { selector: "select#job_application_veteran_status" }` → then `browser_select` with the decline option
+- `browser_get_text { selector: "select#job_application_disability_status" }` → then `browser_select` with the decline option
 
 **Rules:**
 - These fields are almost always optional. If a "Decline" or "Prefer not to answer" option exists, select it.
@@ -167,40 +167,40 @@ For each, first read options then select the decline option:
 
 Before submitting, scroll to the very bottom of the form:
 
-1. Call `browser-scroll { direction: "down", pixels: 2000 }` to reach the bottom.
-2. Call `browser-snapshot { interactive: true }` to check for any missed fields.
-3. Verify all required fields (marked with `*` or `.required`) have been filled using `browser-get-value` on any suspect fields.
-4. Confirm the submit button is visible with `browser-is-visible { selector: "input[type='submit']#submit_app" }`.
+1. Call `browser_scroll { direction: "down", pixels: 2000 }` to reach the bottom.
+2. Call `browser_snapshot { interactive: true }` to check for any missed fields.
+3. Verify all required fields (marked with `*` or `.required`) have been filled using `browser_get_value` on any suspect fields.
+4. Confirm the submit button is visible with `browser_is_visible { selector: "input[type='submit']#submit_app" }`.
 
 ### Submitting the Application
 
 1. Locate the submit button. Try these approaches in order:
-   - `browser-click { selector: "input[type='submit']#submit_app" }`
-   - `browser-find-role { role: "button", name: "Submit Application", action: "click" }`
-   - `browser-find-text { text: "Submit Application", action: "click" }`
-   - From snapshot: `browser-click { selector: "@eN" }` where `@eN` is the submit button ref
-2. Before clicking, check for inline validation errors: `browser-get-count { selector: ".field_with_errors" }`. If count > 0, inspect and fix the affected fields.
+   - `browser_click { selector: "input[type='submit']#submit_app" }`
+   - `browser_find_role { role: "button", name: "Submit Application", action: "click" }`
+   - `browser_find_text { text: "Submit Application", action: "click" }`
+   - From snapshot: `browser_click { selector: "@eN" }` where `@eN` is the submit button ref
+2. Before clicking, check for inline validation errors: `browser_get_count { selector: ".field_with_errors" }`. If count > 0, inspect and fix the affected fields.
 3. If validation errors exist but are unfixable, record them and do NOT submit.
 4. Click the submit button.
 5. Wait for confirmation:
-   - `browser-wait-text { text: "Thank you" }` or `browser-wait-text { text: "Application submitted" }`
-   - Or `browser-wait-url { urlPattern: "**/confirmation" }`
-   - If neither appears within a reasonable time, call `browser-snapshot` to check the page state.
-6. Take a `browser-screenshot { path: "greenhouse-application-result.png" }` of the confirmation state.
+   - `browser_wait_text { text: "Thank you" }` or `browser_wait_text { text: "Application submitted" }`
+   - Or `browser_wait_url { urlPattern: "**/confirmation" }`
+   - If neither appears within a reasonable time, call `browser_snapshot` to check the page state.
+6. Take a `browser_screenshot { path: "greenhouse-application-result.png" }` of the confirmation state.
 
 ### Handling Submission Failures
 
 If submission fails:
 
-1. Check for inline validation errors — use `browser-snapshot` and look for `.field_with_errors` classes. Use `browser-get-text { selector: ".field_with_errors" }` to read error messages.
+1. Check for inline validation errors — use `browser_snapshot` and look for `.field_with_errors` classes. Use `browser_get_text { selector: ".field_with_errors" }` to read error messages.
 2. Record all error messages in the `errors` array.
-3. Try to fix errors by re-filling the highlighted fields with `browser-fill`.
+3. Try to fix errors by re-filling the highlighted fields with `browser_fill`.
 4. If fixable, re-submit. If not, return `success: false` with the errors.
 5. Common failure reasons:
    - Missing required fields (look for `.required` / `*` indicators)
    - Invalid email format
    - Resume file too large or wrong format
-   - Location autocomplete not properly selected (verify with `browser-get-value`)
+   - Location autocomplete not properly selected (verify with `browser_get_value`)
 
 ### Greenhouse-Specific DOM Reference
 
@@ -258,10 +258,10 @@ These selectors are known patterns for Greenhouse application forms. They are hi
 
 ### Greenhouse-Specific Rules
 
-- **Check for the Greenhouse iframe.** Many companies embed the Greenhouse form via an iframe. If `browser-snapshot` shows few interactive elements, look for `iframe#grnhse_iframe` or similar. Call `browser-frame-switch { selector: "iframe#grnhse_iframe" }` before interacting, otherwise all selectors will fail. Call `browser-frame-main` when done.
-- **Scroll the full page before submitting.** Call `browser-scroll { direction: "down", pixels: 2000 }` and re-snapshot to ensure you haven't missed any fields below the fold.
+- **Check for the Greenhouse iframe.** Many companies embed the Greenhouse form via an iframe. If `browser_snapshot` shows few interactive elements, look for `iframe#grnhse_iframe` or similar. Call `browser-frame-switch { selector: "iframe#grnhse_iframe" }` before interacting, otherwise all selectors will fail. Call `browser-frame-main` when done.
+- **Scroll the full page before submitting.** Call `browser_scroll { direction: "down", pixels: 2000 }` and re-snapshot to ensure you haven't missed any fields below the fold.
 - **Do NOT submit if required fields are missing.** Return `success: false` with `submitted: false` and a clear explanation. It is better to fail cleanly than to submit an incomplete application.
 - **`form_pages_visited` should be 1** for Greenhouse. If you encounter a multi-page Greenhouse form (very rare), increment accordingly.
-- **Verify after filling critical fields.** Call `browser-get-value` on name, email, and phone fields after filling to confirm values were set correctly.
-- **Handle the location autocomplete carefully.** After `browser-fill`, call `browser-wait-time { ms: 1000 }`, then `browser-snapshot` to find the suggestion dropdown. Call `browser-click` on the best match. If autocomplete fails after 2 attempts, leave the typed value and note it in `notes`.
+- **Verify after filling critical fields.** Call `browser_get_value` on name, email, and phone fields after filling to confirm values were set correctly.
+- **Handle the location autocomplete carefully.** After `browser_fill`, call `browser_wait_time { ms: 1000 }`, then `browser_snapshot` to find the suggestion dropdown. Call `browser_click` on the best match. If autocomplete fails after 2 attempts, leave the typed value and note it in `notes`.
 - **Greenhouse forms are public.** If login is required as observed in the actual page snapshot, something is unusual. Stop and report `blocked`.

@@ -441,6 +441,14 @@ export class SchedulerService {
 				return;
 			}
 
+			// Proactively clear any pagination bookmarks that have exceeded their
+			// board-specific retention window. This ensures boards are reset to
+			// page 1 on schedule even if no scrape fired during the window.
+			const expired = await jobBoardService.cleanupExpiredPaginationBookmarks();
+			if (expired > 0) {
+				schedulerLogger.info(`[${JOB_SCRAPE}] Cleared ${expired} expired pagination bookmark(s)`);
+			}
+
 			// Only fetch boards that are due (next_check <= now and enabled)
 			const now = new Date().toISOString();
 			const allBoards = await jobBoardService.getJobBoards();
@@ -464,8 +472,7 @@ export class SchedulerService {
 					schedulerLogger.info(`[${JOB_SCRAPE}] Scraping: ${board.name} (id=${board.id})`);
 
 					await scraperService.scrape({
-						jobBoardId: board.id,
-						url: board.base_url
+						jobBoardId: board.id
 					});
 
 					scraped++;

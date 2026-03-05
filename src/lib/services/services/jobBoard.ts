@@ -211,6 +211,32 @@ export class JobBoardService {
 	}
 
 	/**
+	 * Proactively clear expired pagination bookmarks across all job boards.
+	 *
+	 * Each board's `page_retention_days` defines the maximum age of its
+	 * `last_page_scraped_at` timestamp. Any board whose bookmark is older
+	 * than that window is reset so the next scrape starts from page 1.
+	 *
+	 * This runs in a single UPDATE rather than per-board, so it is safe
+	 * to call on every scheduler tick without noticeable overhead.
+	 *
+	 * @returns The number of boards whose bookmarks were cleared.
+	 */
+	async cleanupExpiredPaginationBookmarks(): Promise<number> {
+		const result = await this.db.run(
+			`UPDATE job_boards
+			 SET last_scraped_page = NULL,
+			     last_scraped_page_url = NULL,
+			     last_page_scraped_at = NULL
+			 WHERE last_page_scraped_at IS NOT NULL
+			   AND (
+			     julianday('now') - julianday(last_page_scraped_at)
+			   ) > page_retention_days`
+		);
+		return result.changes ?? 0;
+	}
+
+	/**
 	 * Resolve the pagination state for a scrape session.
 	 *
 	 * If the last-page bookmark exists but is older than the configured
