@@ -69,11 +69,15 @@ export function ensureRunScreenshotDir(runDir: string): void {
 }
 
 /**
- * Capture a full-page screenshot and save it to `filePath`.
+ * Capture an annotated full-page screenshot and save it to `filePath`.
  *
- * Uses `agent-browser screenshot <path> --full`. The path is resolved to an
- * absolute path before being passed to the CLI so it lands in the correct
- * location regardless of what cwd agent-browser happens to use.
+ * Uses `agent-browser screenshot --annotate --full <path>`. The `--annotate`
+ * flag overlays numbered labels on each interactive element so the screenshot
+ * doubles as a visual audit trail — you can see exactly which elements were
+ * available to the agent at each step.
+ *
+ * The path is resolved to an absolute path before being passed to the CLI so
+ * it lands in the correct location regardless of what cwd agent-browser uses.
  *
  * Returns `true` on success, `false` if the browser command fails (non-fatal —
  * a screenshot failure should never abort the pipeline).
@@ -90,7 +94,7 @@ export async function captureAnnotatedScreenshot(filePath: string): Promise<bool
 			fs.mkdirSync(dir, { recursive: true });
 		}
 
-		const result = await browserExec(['screenshot', '--full', absolutePath], {
+		const result = await browserExec(['screenshot', '--annotate', '--full', absolutePath], {
 			timeout: 30_000
 		});
 

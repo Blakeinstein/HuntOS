@@ -4,6 +4,20 @@
 // Supports an optional `onToolCall` callback so callers (e.g. the apply
 // pipeline executor) can route tool-call events to an audit log, database,
 // or any other sink without the tool needing direct access to those services.
+//
+// IMPORTANT: Mastra 1.4.0's `makeCoreTool()` / `CoreToolBuilder.build()` creates
+// a NEW plain object for the AI SDK runtime, copying only specific properties
+// (id, description, parameters, outputSchema, execute, etc.) from the original
+// Tool instance. Any monkey-patched `onOutput` / `onInputAvailable` hooks are
+// NOT copied to the CoreTool object and therefore never fire.
+//
+// The fix: wrap `execute` directly. Since `makeCoreTool` DOES copy the `execute`
+// function (via `this.createExecute(this.originalTool, ...)` which calls the
+// original tool's execute), wrapping `execute` on the Tool instance before
+// registration ensures our wrapper survives the CoreTool conversion.
+//
+// This approach fires the callback on BOTH success and error, capturing the
+// input, output, duration, and success status of every tool invocation.
 
 import type { Tool } from '@mastra/core/tools';
 import { logger } from '../logger';
@@ -44,7 +58,7 @@ export interface ToolLoggingOptions {
 	 *   onToolCall: (evt) => {
 	 *     auditLogService.create({
 	 *       category: 'browser',
-	 *       agent_id: 'job-application-agent.linkedin',
+	 *       agent_id: 'job-application-agent',
 	 *       status: evt.success ? 'success' : 'error',
 	 *       title: `Tool: ${evt.toolId}`,
 	 *       detail: evt.success
@@ -61,19 +75,27 @@ export interface ToolLoggingOptions {
 }
 
 /**
- * Wraps a tool with `onInputAvailable` and `onOutput` lifecycle hooks that
- * log the incoming parameters and the resulting output via the shared PinoLogger.
+ * Monotonically increasing counter for generating unique tool call IDs
+ * when no toolCallId is available from the runtime context.
+ */
+let callCounter = 0;
+
+/**
+ * Wraps a tool's `execute` function with logging and an optional callback.
  *
- * When an `onToolCall` callback is provided, it is invoked after each tool
- * execution with a {@link ToolCallEvent} payload that includes the tool ID,
- * input, output, success flag, and duration.
+ * This is the PRIMARY mechanism for tool-call observability. We wrap `execute`
+ * directly because Mastra 1.4.0's `makeCoreTool()` / `CoreToolBuilder.build()`
+ * strips `onOutput` and `onInputAvailable` hooks when converting Tool instances
+ * to CoreTool objects for the AI SDK. However, `execute` IS preserved through
+ * the conversion (it's called by the CoreTool's own execute wrapper), so our
+ * logging wrapper survives.
  *
- * This is non-destructive — it preserves the original tool's config and only
- * layers logging on top. Any existing hooks are called after the logging hooks.
- *
- * We cast through `any` because the `Tool` generic has deeply nested type
- * parameters that make the constraint `T extends Tool` reject concrete tools.
- * At runtime the properties exist on every tool instance created via `createTool`.
+ * The wrapper:
+ * 1. Captures the input parameters and start time
+ * 2. Calls the original execute function
+ * 3. On success: logs the output and fires the onToolCall callback
+ * 4. On error: logs the error and fires the onToolCall callback
+ * 5. Re-throws any error so the agent sees it
  *
  * @example
  * ```ts
@@ -89,94 +111,94 @@ export function withToolLogging<T extends Tool<any, any, any, any, any, any, any
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const t = tool as any;
 
-	const originalOnInputAvailable = t.onInputAvailable;
-	const originalOnOutput = t.onOutput;
 	const originalExecute = t.execute;
+	if (!originalExecute) {
+		// Tool has no execute function — nothing to wrap
+		return t as T;
+	}
 
-	// Per-call timing map: toolCallId → startTime
-	const callTimings = new Map<string, number>();
+	const toolId: string = t.id ?? 'unknown-tool';
 
-	// Attach pre-execution logging
+	// Wrap execute — this is the ONLY reliable hook that survives Mastra's
+	// CoreTool conversion. Both success and error paths fire the callback.
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	t.onInputAvailable = (params: any) => {
-		const toolCallId = params.toolCallId ?? 'unknown';
-		callTimings.set(toolCallId, Date.now());
+	t.execute = async function (this: any, ...args: any[]) {
+		const startTime = Date.now();
+		const callId = `call-${toolId}-${++callCounter}`;
 
-		logger.debug(`[tool:${t.id}] input available`, {
-			toolCallId,
-			input: params.input
-		});
-		originalOnInputAvailable?.call(t, params);
-	};
+		// The first argument is the validated input object.
+		// Mastra's CoreTool wraps the original execute and passes the validated
+		// input as the first positional argument.
+		const input =
+			args[0] !== null && typeof args[0] === 'object' && !Array.isArray(args[0])
+				? (args[0] as Record<string, unknown>)
+				: {};
 
-	// Attach post-execution logging
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	t.onOutput = (params: any) => {
-		const toolCallId = params.toolCallId ?? 'unknown';
-		const startTime = callTimings.get(toolCallId);
-		const durationMs = startTime ? Date.now() - startTime : 0;
-		callTimings.delete(toolCallId);
-
-		logger.debug(`[tool:${t.id}] output received`, {
-			toolCallId,
-			toolName: params.toolName,
-			output: params.output,
-			durationMs
+		logger.debug(`[tool:${toolId}] execute called`, {
+			toolCallId: callId,
+			input
 		});
 
-		// Fire the audit callback if provided
-		if (options?.onToolCall) {
-			try {
-				options.onToolCall({
-					toolId: t.id,
-					toolCallId,
-					input: params.input ?? {},
-					output: params.output,
-					success: true,
-					durationMs
-				});
-			} catch (callbackError) {
-				logger.warn(`[tool:${t.id}] onToolCall callback threw`, { error: callbackError });
-			}
-		}
+		try {
+			const result = await originalExecute.apply(this, args);
+			const durationMs = Date.now() - startTime;
 
-		originalOnOutput?.call(t, params);
-	};
+			logger.debug(`[tool:${toolId}] execute completed`, {
+				toolCallId: callId,
+				output: result,
+				durationMs
+			});
 
-	// If onToolCall is provided, also wrap `execute` to catch errors that
-	// don't trigger `onOutput` (e.g. when the tool throws before returning).
-	if (options?.onToolCall && originalExecute) {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		t.execute = async function (this: any, ...args: any[]) {
-			const startTime = Date.now();
-			// The first argument is typically the input object
-			const input = args[0] ?? {};
-			try {
-				const result = await originalExecute.apply(this, args);
-				return result;
-			} catch (error) {
-				const durationMs = Date.now() - startTime;
-				const errorMessage = error instanceof Error ? error.message : String(error);
-
+			// Fire the audit callback on success
+			if (options?.onToolCall) {
 				try {
-					options.onToolCall!({
-						toolId: t.id,
-						toolCallId: 'error-' + Date.now(),
-						input: typeof input === 'object' ? input : {},
+					options.onToolCall({
+						toolId,
+						toolCallId: callId,
+						input,
+						output: result as Record<string, unknown>,
+						success: true,
+						durationMs
+					});
+				} catch (callbackError) {
+					logger.warn(`[tool:${toolId}] onToolCall success callback threw`, {
+						error: callbackError
+					});
+				}
+			}
+
+			return result;
+		} catch (error) {
+			const durationMs = Date.now() - startTime;
+			const errorMessage = error instanceof Error ? error.message : String(error);
+
+			logger.debug(`[tool:${toolId}] execute failed`, {
+				toolCallId: callId,
+				error: errorMessage,
+				durationMs
+			});
+
+			// Fire the audit callback on error
+			if (options?.onToolCall) {
+				try {
+					options.onToolCall({
+						toolId,
+						toolCallId: callId,
+						input,
 						success: false,
 						error: errorMessage,
 						durationMs
 					});
 				} catch (callbackError) {
-					logger.warn(`[tool:${t.id}] onToolCall error callback threw`, {
+					logger.warn(`[tool:${toolId}] onToolCall error callback threw`, {
 						error: callbackError
 					});
 				}
-
-				throw error;
 			}
-		};
-	}
+
+			throw error;
+		}
+	};
 
 	return t as T;
 }

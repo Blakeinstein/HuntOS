@@ -18,6 +18,7 @@ import {
 } from './agents/job-board-agent/index';
 import { createJobApplicationAgent } from './agents/job-application-agent/index';
 import { logger } from './logger';
+import { logToolCallToPipeline } from '$lib/services/helpers/pipelineContext';
 
 const services = createServices(db);
 
@@ -45,6 +46,7 @@ const genericAgent = createGenericAgent();
 // to the audit_logs table so individual tool calls are visible in the UI.
 const toolAuditCallback = {
 	onToolCall: (evt: import('./tools/with-logging').ToolCallEvent) => {
+		// 1. Write to the audit_logs table (existing behaviour)
 		services.auditLogService.create({
 			category: 'browser',
 			agent_id: 'job-application-agent',
@@ -67,6 +69,16 @@ const toolAuditCallback = {
 				...(evt.error ? { error: evt.error } : {})
 			}
 		});
+
+		// 2. Write to pipeline step logs in real-time (if a pipeline is active).
+		//    This makes tool responses show up immediately in the pipeline UI
+		//    instead of waiting for the full iteration to complete.
+		//    Also captures proactive screenshots after key interactions for audit.
+		logToolCallToPipeline(evt.toolId, evt.input, evt.output, evt.success, evt.durationMs).catch(
+			(err) => {
+				logger.warn('[mastra] Pipeline tool-call log failed', { error: String(err) });
+			}
+		);
 	}
 };
 

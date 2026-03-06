@@ -55,6 +55,11 @@ import {
 	ensureRunScreenshotDir,
 	captureIterationScreenshot
 } from '$lib/services/helpers/screenshotRun';
+import {
+	setPipelineContext,
+	clearPipelineContext,
+	resetScreenshotCounter
+} from '$lib/services/helpers/pipelineContext';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -1347,6 +1352,19 @@ export class ApplyPipelineExecutor {
 
 			let appResult: ApplicationResult;
 
+			// ── Set pipeline context for real-time tool logging ──────
+			// This allows the onToolCall callback in mastra/index.ts to
+			// write tool responses to pipeline step logs immediately
+			// (instead of waiting for the full iteration to complete),
+			// and to capture proactive screenshots after key interactions.
+			setPipelineContext({
+				runId,
+				step,
+				pipelineService: this.pipelineService,
+				screenshotDir: screenshotRunDir,
+				applicationId: application.id
+			});
+
 			try {
 				// Use the continuation loop: if the agent stops mid-task without
 				// producing a JSON result, the loop feeds the conversation history
@@ -1361,6 +1379,8 @@ export class ApplyPipelineExecutor {
 					maxIterations: this.appSettingsService.agentMaxIterations,
 					onBeforeIteration: (iteration, totalStepsSoFar) => {
 						this.checkCancelled(runId);
+						// Reset the per-iteration proactive screenshot counter
+						resetScreenshotCounter();
 						this.log(
 							runId,
 							step,
@@ -1401,11 +1421,17 @@ export class ApplyPipelineExecutor {
 						// Captured outside the agent so it always runs even when the
 						// agent gets stuck or produces no output.
 						await captureIterationScreenshot(screenshotRunDir, info.iteration, 'after');
+						const iterScreenshotFile = `iter-${String(info.iteration).padStart(2, '0')}-after.png`;
+						const iterScreenshotRel = path.relative(
+							process.cwd(),
+							path.join(screenshotRunDir, iterScreenshotFile)
+						);
 						this.log(
 							runId,
 							step,
-							`Screenshot saved: iter-${String(info.iteration).padStart(2, '0')}-after.png`,
-							'progress'
+							`📸 Iteration ${info.iteration} screenshot saved: ${iterScreenshotFile}`,
+							'progress',
+							{ screenshotPath: iterScreenshotRel }
 						);
 					}
 				});
@@ -1421,7 +1447,13 @@ export class ApplyPipelineExecutor {
 
 				// ── Final screenshot after loop completes ────────────
 				await captureIterationScreenshot(screenshotRunDir, loopResult.iterations, 'final');
-				this.log(runId, step, `Final screenshot saved: final.png`, 'progress');
+				const finalScreenshotRel = path.relative(
+					process.cwd(),
+					path.join(screenshotRunDir, 'final.png')
+				);
+				this.log(runId, step, `📸 Final screenshot saved`, 'progress', {
+					screenshotPath: finalScreenshotRel
+				});
 
 				if (loopResult.result) {
 					appResult = loopResult.result;
@@ -1512,6 +1544,10 @@ export class ApplyPipelineExecutor {
 					`Successfully extracted structured result from error details`,
 					'progress'
 				);
+			} finally {
+				// Always clear pipeline context so tool callbacks stop writing
+				// step logs after the agent loop completes (or fails).
+				clearPipelineContext();
 			}
 
 			agentStartAudit({

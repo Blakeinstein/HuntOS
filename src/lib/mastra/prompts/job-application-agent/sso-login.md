@@ -6,7 +6,7 @@ Many job application sites and ATS platforms allow (or require) login via a thir
 
 ### Step SSO-1: Detect SSO Options on a Login Wall
 
-When the snapshot shows a login page or sign-in wall, call `browser_snapshot { interactive: true }` and look for any of the following SSO buttons before giving up:
+When the observation shows a login page or sign-in wall, call `browser_observe_page` (preferred — gives you both a visual annotated screenshot and the accessibility tree) and look for any of the following SSO buttons before giving up:
 
 | Button Text / Label Pattern | Provider | Priority |
 |----------------------------|----------|----------|
@@ -41,7 +41,7 @@ LinkedIn's OAuth consent page URL contains `linkedin.com/oauth` or `linkedin.com
 
 1. Call `browser_wait_load { state: "networkidle" }` after clicking the SSO button.
 2. Call `browser_get_url` to confirm you have landed on a LinkedIn domain.
-3. Call `browser_snapshot` to inspect the page.
+3. Call `browser_observe_page` to inspect the page — the annotated screenshot helps visually distinguish between a consent screen and a login form.
 
 **Case A — Already authenticated with LinkedIn (most common):**
 - The page will immediately redirect back to the application site without showing a login form.
@@ -52,7 +52,7 @@ LinkedIn's OAuth consent page URL contains `linkedin.com/oauth` or `linkedin.com
 - The page asks "Allow [App] to access your LinkedIn account?" with "Allow" and "Cancel" buttons.
 - Call `browser_find_text { text: "Allow", action: "click" }` or `browser_find_role { role: "button", name: "Allow", action: "click" }`.
 - Wait for redirect: `browser_wait_load { state: "networkidle" }`.
-- Call `browser_get_url` and `browser_snapshot` to confirm you are back on the application site.
+- Call `browser_get_url` and `browser_observe_page` to confirm you are back on the application site.
 
 **Case C — LinkedIn shows a login form (not authenticated):**
 - The page shows email/password fields for LinkedIn itself.
@@ -64,7 +64,7 @@ LinkedIn's OAuth consent page URL contains `linkedin.com/oauth` or `linkedin.com
 Google's OAuth page URL contains `accounts.google.com`.
 
 1. Call `browser_wait_load { state: "networkidle" }` and `browser_get_url`.
-2. Call `browser_snapshot`.
+2. Call `browser_observe_page` to inspect the page.
 
 **Case A — Google account chooser (already signed in):**
 - The page shows one or more Google accounts to choose from.
@@ -85,7 +85,7 @@ Google's OAuth page URL contains `accounts.google.com`.
 Microsoft's OAuth page URL contains `login.microsoftonline.com` or `login.live.com`.
 
 1. Call `browser_wait_load { state: "networkidle" }` and `browser_get_url`.
-2. Call `browser_snapshot`.
+2. Call `browser_observe_page` to inspect the page.
 
 **Case A — Microsoft account already signed in (consent or account picker):**
 - Look for the user's email in an account picker and click it.
@@ -110,7 +110,7 @@ After any SSO flow completes (or redirects back), verify you are on the correct 
 
 1. Call `browser_wait_load { state: "networkidle" }`.
 2. Call `browser_get_url` — confirm the domain matches the original application URL.
-3. Call `browser_snapshot` — verify the application form (or a job posting page) is now visible.
+3. Call `browser_observe_page` — verify the application form (or a job posting page) is now visible. The annotated screenshot helps you visually confirm the form is accessible and ready for filling.
 
 If the application form is now visible, **continue from Step 3 of the main instructions** (Identify the Application Form). Do NOT re-run Steps 1 or 2 — you are already authenticated and on the correct page.
 
@@ -128,7 +128,7 @@ Some sites open the SSO provider in a **new tab or popup window** rather than re
 4. Handle the SSO provider flow as described in Step SSO-2.
 5. After the provider flow completes, the popup/tab typically closes automatically. Call `browser-tab-list` again.
 6. Switch back to the original application tab: `browser-tab-switch { index: 0 }` (or whichever index the original tab is at).
-7. Call `browser_wait_load { state: "networkidle" }` and `browser_snapshot` to confirm the application page is now authenticated.
+7. Call `browser_wait_load { state: "networkidle" }` and `browser_observe_page` to confirm the application page is now authenticated.
 
 ---
 

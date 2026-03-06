@@ -18,13 +18,13 @@ Greenhouse is one of the most common Applicant Tracking Systems. Its application
 
 ### Greenhouse Page State Handling
 
-After navigating and taking a snapshot, check for these Greenhouse-specific conditions:
+After navigating and observing the page, check for these Greenhouse-specific conditions:
 
-- **Embedded iframe:** If the Greenhouse form is embedded in a company's custom career page via an `<iframe>`, call `browser-frame-switch` with `selector: "iframe#grnhse_iframe"` (or `"iframe[src*='greenhouse.io']"`, `"iframe[title*='Greenhouse']"`). Then call `browser_snapshot` to see the form fields inside the frame.
-- **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser_find_text { text: "Accept", action: "click" }` or `browser_find_role { role: "button", name: "Close", action: "click" }`. Re-take `browser_snapshot`.
+- **Embedded iframe:** If the Greenhouse form is embedded in a company's custom career page via an `<iframe>`, call `browser-frame-switch` with `selector: "iframe#grnhse_iframe"` (or `"iframe[src*='greenhouse.io']"`, `"iframe[title*='Greenhouse']"`). Then call `browser_observe_page` to see the form fields inside the frame — the annotated screenshot is especially helpful for confirming you've entered the iframe context correctly.
+- **Cookie consent / overlays:** Dismiss any cookie banners or notification modals. Use `browser_find_text { text: "Accept", action: "click" }` or `browser_find_role { role: "button", name: "Close", action: "click" }`. Re-observe with `browser_observe_page`.
 - **"No longer accepting applications":** If the page shows "This job is no longer accepting applications", "Position filled", "Job closed", or a similar closed-position message, STOP. Return `success: false`, `end_reason: "closed"`, and `end_reason_description` explaining the specific reason (e.g., "The job posting is no longer accepting applications").
 - **404 or error page:** If the page shows a 404, "Job not found", or server error, STOP. Return `success: false`, `end_reason: "error"`, and `end_reason_description` explaining the issue.
-- **Login/authentication wall:** Greenhouse forms are almost never gated behind login. However, some companies configure their Greenhouse instance to require sign-in. If **the snapshot shows** a login form or authentication wall, **do NOT immediately block** — first inspect the page for SSO buttons (LinkedIn, Google, Microsoft). Follow the **SSO / Social Login Handling** steps in Step 2a of the base instructions. Only return `blocked: true` with `blocked_reason: "Authentication required"` if no SSO option is available or all SSO attempts fail.
+- **Login/authentication wall:** Greenhouse forms are almost never gated behind login. However, some companies configure their Greenhouse instance to require sign-in. If **the observation shows** a login form or authentication wall, **do NOT immediately block** — first inspect the page for SSO buttons (LinkedIn, Google, Microsoft). Follow the **SSO / Social Login Handling** steps in Step 2a of the base instructions. Only return `blocked: true` with `blocked_reason: "Authentication required"` if no SSO option is available or all SSO attempts fail.
 - **CAPTCHA:** If a CAPTCHA challenge is detected, STOP immediately. Return `blocked: true` with `blocked_reason: "CAPTCHA detected"`.
 
 ### Identifying the Application Form
@@ -40,7 +40,7 @@ Locate the form element. If the form is not immediately visible:
 - Use `browser_find_text { text: "Apply for this job", action: "text" }` to locate the section.
 - If an "Apply" button is needed to reveal the form, use `browser_find_role { role: "button", name: "Apply", action: "click" }`.
 
-Take a `browser_snapshot` once you have the form in view.
+Call `browser_observe_page` once you have the form in view — the annotated screenshot gives you a visual overview of the entire single-page form layout, while the accessibility tree provides the @e refs needed for interaction.
 
 ### Filling Personal Information Fields
 
@@ -61,7 +61,7 @@ The personal info section typically appears first. Greenhouse uses consistent fi
 **Location autocomplete handling:** Greenhouse's location field often uses Google Places autocomplete. After filling:
 1. Call `browser_fill { selector: "#job_application_location", text: "City, State" }`.
 2. Call `browser_wait_time { ms: 1000 }` for the autocomplete dropdown to appear.
-3. Call `browser_snapshot` to look for a suggestion list (`.pac-container`, `ul[role="listbox"]`).
+3. Call `browser_observe_page` to look for a suggestion list (`.pac-container`, `ul[role="listbox"]`) — the annotated screenshot makes it easy to visually spot the autocomplete dropdown.
 4. Call `browser_click` on the first matching suggestion (e.g. `browser_find_first { selector: ".pac-item", action: "click" }`).
 5. If no autocomplete appears, the value may have been accepted as-is — verify with `browser_get_value { selector: "#job_application_location" }`.
 
@@ -71,7 +71,7 @@ The resume/cover letter section appears after personal information.
 
 #### Resume Upload
 
-1. Locate the resume upload area using `browser_snapshot`. Look for:
+1. Locate the resume upload area using `browser_observe_page` — the annotated screenshot helps visually identify the upload zone. Look for:
    - `input[type="file"]#resume`, `input[name="job_application[resume]"]`
    - A `<div>` with text "Attach" or "Drop" containing a hidden file input
    - A link/button with text "Attach Resume/CV" that reveals the file input
@@ -79,7 +79,7 @@ The resume/cover letter section appears after personal information.
 2. If a clickable "Attach" or "Choose file" link exists, click it first: `browser_find_text { text: "Attach", action: "click" }` to surface the file input.
 3. If Resume File Path is not empty, call `browser_fill { selector: "input[type='file']#resume", text: "<Resume File Path>" }`.
 4. If Resume File Path is empty, record the field as `missing` if resume upload is required.
-5. After uploading, call `browser_snapshot` to verify the filename appears in the upload confirmation area (`.uploaded-filename` or similar).
+5. After uploading, call `browser_observe_page` to visually verify the filename appears in the upload confirmation area (`.uploaded-filename` or similar).
 
 #### Cover Letter
 
@@ -113,11 +113,29 @@ Scroll down to ensure all custom questions are visible, then handle each by type
 - Common examples: "Why are you interested in this role?", "Describe your experience with [technology]."
 
 #### Select / Dropdown Questions
-- `<select>` elements with predefined options.
-- First read all options with `browser_get_text` or `browser_get_html` on the `<select>` element.
+
+Greenhouse forms use **both native `<select>` elements AND custom JS dropdowns**. You MUST identify the type before interacting — using the wrong method will silently fail or leave the field empty, causing validation errors that block submission.
+
+**How to identify the dropdown type:**
+1. Take `browser_screenshot_annotated` — native `<select>` appears as a plain browser-styled dropdown; custom dropdowns appear as styled buttons/divs with custom chevrons or branded styling.
+2. Check the `browser_snapshot` — native selects show `<select>` with `<option>` children. Custom dropdowns show `<div>`, `<button>`, or `<span>` with `role="listbox"`, `role="combobox"`, `aria-haspopup="listbox"`, or `aria-expanded`.
+
+**For native `<select>` dropdowns (has `<option>` children in snapshot):**
+- `browser_get_html { selector: "@eN" }` — read all `<option>` elements and their `value` attributes.
 - Choose the most appropriate option based on the User Profile.
-- Common examples: "Years of experience", "Highest education level", "Preferred work arrangement".
-- Use `browser_select { selector: "@eN", value: "Option Text" }` with the matching option value.
+- `browser_select { selector: "@eN", value: "option_value" }` — use the `value` attribute from the `<option>`, NOT the display text (unless they match).
+- `browser_screenshot_annotated` — verify the selected option is now displayed.
+- Common examples: "Years of experience", "Highest education level", EEOC fields (gender, race, veteran, disability).
+
+**For custom/JS dropdowns (no `<option>` children, uses `role="listbox"` or similar):**
+- `browser_click { selector: "@eN" }` — click the dropdown trigger to open it.
+- `browser_wait_time { ms: 500 }` — wait for the options panel to appear.
+- `browser_snapshot` — get fresh @e refs for the now-visible option items (look for `role="option"` elements).
+- `browser_screenshot_annotated` — SEE the open dropdown with all available options labeled.
+- `browser_click { selector: "@eM" }` — click the desired option.
+- `browser_screenshot_annotated` — verify the dropdown now shows the correct selected value.
+
+**If `browser_select` returns a failure/error, the element is NOT a native `<select>`. Do NOT retry `browser_select` — switch immediately to the click-to-open pattern.**
 
 #### Checkbox Questions
 - `<input type="checkbox">` elements.
@@ -152,11 +170,19 @@ US-based Greenhouse postings often include an Equal Employment Opportunity Commi
 - **Veteran Status:** Select "I don't wish to answer" or "I am not a veteran"
 - **Disability Status:** Select "I don't wish to answer" or "I do not wish to answer"
 
-For each, first read options then select the decline option:
-- `browser_get_text { selector: "select#job_application_gender" }` → then `browser_select { selector: "select#job_application_gender", value: "Decline to self-identify" }`
-- `browser_get_text { selector: "select#job_application_race" }` → then `browser_select { selector: "select#job_application_race", value: "Decline to self-identify" }`
-- `browser_get_text { selector: "select#job_application_veteran_status" }` → then `browser_select` with the decline option
-- `browser_get_text { selector: "select#job_application_disability_status" }` → then `browser_select` with the decline option
+**EEOC fields are typically native `<select>` elements on Greenhouse.** Use the following pattern for each:
+
+1. First, take `browser_screenshot_annotated` to visually identify all EEOC dropdown fields and their state.
+2. For each field, read options first, then select the decline option:
+   - `browser_get_html { selector: "select#job_application_gender" }` → read `<option>` values → `browser_select { selector: "select#job_application_gender", value: "Decline to self-identify" }`
+   - `browser_get_html { selector: "select#job_application_race" }` → read `<option>` values → `browser_select` with the decline option value
+   - `browser_get_html { selector: "select#job_application_veteran_status" }` → read `<option>` values → `browser_select` with the decline option value
+   - `browser_get_html { selector: "select#job_application_disability_status" }` → read `<option>` values → `browser_select` with the decline option value
+3. After selecting each field, `browser_screenshot_annotated` to verify the decline option is displayed.
+
+**Important:** Use `browser_get_html` (not `browser_get_text`) so you can see the `value` attributes of each `<option>`. The `value` attribute is what `browser_select` needs — it may differ from the display text (e.g., `value="2"` for display text "Decline to self-identify").
+
+**If any EEOC field is a custom dropdown instead of a native `<select>`** (no `<option>` children in snapshot), use the click-to-open pattern: `browser_click` to open → `browser_wait_time { ms: 500 }` → `browser_snapshot` → `browser_click` the "Decline" / "Prefer not to answer" option.
 
 **Rules:**
 - These fields are almost always optional. If a "Decline" or "Prefer not to answer" option exists, select it.
@@ -230,7 +256,8 @@ These selectors are known patterns for Greenhouse application forms. They are hi
 - Question wrapper: `div.field`, `div.custom-question`
 - Text input: `input[type="text"]` inside a `.field` div
 - Textarea: `textarea` inside a `.field` div
-- Select: `select` inside a `.field` div
+- Native select dropdown: `select` inside a `.field` div — has `<option>` children, use `browser_select`
+- Custom JS dropdown: `div[role="listbox"]`, `button[aria-haspopup="listbox"]`, or styled `<div>` acting as a select — use click-to-open + click-option
 - Checkbox: `input[type="checkbox"]` inside a `.field` div
 - Radio: `input[type="radio"]` inside a `.field` div
 - Required indicator: `.required`, `*` in label text, `[aria-required="true"]`
@@ -265,3 +292,5 @@ These selectors are known patterns for Greenhouse application forms. They are hi
 - **Verify after filling critical fields.** Call `browser_get_value` on name, email, and phone fields after filling to confirm values were set correctly.
 - **Handle the location autocomplete carefully.** After `browser_fill`, call `browser_wait_time { ms: 1000 }`, then `browser_snapshot` to find the suggestion dropdown. Call `browser_click` on the best match. If autocomplete fails after 2 attempts, leave the typed value and note it in `notes`.
 - **Greenhouse forms are public.** If login is required as observed in the actual page snapshot, something is unusual. Stop and report `blocked`.
+- **Dropdown validation errors are a common blocker.** If a dropdown field shows a validation error after you used `browser_select`, verify the element is actually a native `<select>` by checking for `<option>` children in the snapshot. If it's a custom dropdown, switch to the click-to-open + click-option pattern. Always `browser_screenshot_annotated` after selecting to visually confirm the value was set.
+- **Use `browser_get_html` (not `browser_get_text`) to read dropdown options.** This gives you both the display text AND the `value` attribute for each `<option>`, which is what `browser_select` requires. The `value` may differ from the visible text.

@@ -19,7 +19,9 @@
 		AlertCircleIcon,
 		MessageSquareIcon,
 		ClipboardListIcon,
-		ScrollTextIcon
+		ScrollTextIcon,
+		CameraIcon,
+		XIcon
 	} from '@lucide/svelte';
 	import type {
 		PipelineRun,
@@ -71,6 +73,8 @@
 	let expandedResources = new SvelteSet<number>();
 	let expandedSteps = new SvelteSet<string>();
 	let expandedLogs = new SvelteSet<number>();
+	let expandedScreenshots = new SvelteSet<number>();
+	let lightboxSrc: string | null = $state(null);
 	let localLatestRun = $state<PipelineRun | null>(null);
 	let localResources = $state<ApplicationResource[]>([]);
 	let stepLogs = $state<PipelineStepLog[]>([]);
@@ -372,6 +376,41 @@
 		}
 	}
 
+	/**
+	 * Check if a step log entry has an associated screenshot path in its meta.
+	 */
+	function hasScreenshot(log: PipelineStepLog): boolean {
+		return typeof log.meta?.screenshotPath === 'string' && log.meta.screenshotPath.length > 0;
+	}
+
+	/**
+	 * Build the URL to serve a screenshot via the admin screenshots API.
+	 *
+	 * The screenshotPath stored in meta is relative to cwd, e.g.
+	 *   "data/logs/screenshots/Company-42/Title/step-001-browser-click.png"
+	 *
+	 * The API expects `?run=<runDir>&file=<filename>` where runDir is the
+	 * path under data/logs/screenshots/ and filename is relative within it.
+	 */
+	function screenshotUrl(screenshotPath: string): string {
+		// Strip the "data/logs/screenshots/" prefix to get the run-relative path
+		const prefix = 'data/logs/screenshots/';
+		const relative = screenshotPath.startsWith(prefix)
+			? screenshotPath.slice(prefix.length)
+			: screenshotPath;
+
+		// Split into run directory (first two segments: company-id/title) and filename
+		const parts = relative.split('/');
+		if (parts.length >= 3) {
+			const run = parts.slice(0, -1).join('/');
+			const file = parts[parts.length - 1];
+			return `/api/admin/screenshots?run=${encodeURIComponent(run)}&file=${encodeURIComponent(file)}`;
+		}
+
+		// Fallback: treat entire path as the file within root
+		return `/api/admin/screenshots?run=&file=${encodeURIComponent(relative)}`;
+	}
+
 	function formatTime(dateStr: string): string {
 		return new Date(dateStr).toLocaleTimeString('en-US', {
 			hour: '2-digit',
@@ -570,7 +609,7 @@
 							<!-- Expanded step logs -->
 							{#if isExpanded && hasLogs}
 								<div
-									class="mt-2 max-h-48 space-y-0.5 overflow-y-auto rounded-md border border-surface-200-800 bg-surface-100-900 p-2"
+									class="mt-2 max-h-96 space-y-0.5 overflow-y-auto rounded-md border border-surface-200-800 bg-surface-100-900 p-2"
 								>
 									{#each logs as log (log.id)}
 										{@const LogIcon = getLogIcon(log.level)}
@@ -579,32 +618,65 @@
 										<div class="flex items-start gap-1.5 py-0.5">
 											<LogIcon class="mt-px size-3 shrink-0 {getLogColor(log.level)}" />
 											<div class="min-w-0 flex-1">
-												<p
-													class="text-[11px] leading-relaxed {getLogColor(log.level)}"
-													class:whitespace-pre-wrap={isLogExpanded}
-												>
-													{#if isLongLog && !isLogExpanded}
-														{log.message.slice(0, LOG_TRUNCATE_LENGTH)}…
-														<button
-															type="button"
-															class="ml-1 inline text-[10px] underline opacity-60 hover:opacity-100"
-															onclick={() => expandedLogs.add(log.id)}
-														>
-															show more
-														</button>
-													{:else}
-														{log.message}
-														{#if isLongLog}
+												<div class="flex items-start gap-1">
+													<p
+														class="flex-1 text-[11px] leading-relaxed {getLogColor(log.level)}"
+														class:whitespace-pre-wrap={isLogExpanded}
+													>
+														{#if isLongLog && !isLogExpanded}
+															{log.message.slice(0, LOG_TRUNCATE_LENGTH)}…
 															<button
 																type="button"
 																class="ml-1 inline text-[10px] underline opacity-60 hover:opacity-100"
-																onclick={() => expandedLogs.delete(log.id)}
+																onclick={() => expandedLogs.add(log.id)}
 															>
-																show less
+																show more
 															</button>
+														{:else}
+															{log.message}
+															{#if isLongLog}
+																<button
+																	type="button"
+																	class="ml-1 inline text-[10px] underline opacity-60 hover:opacity-100"
+																	onclick={() => expandedLogs.delete(log.id)}
+																>
+																	show less
+																</button>
+															{/if}
 														{/if}
+													</p>
+													{#if hasScreenshot(log)}
+														<button
+															type="button"
+															class="shrink-0 rounded p-0.5 opacity-40 transition-opacity hover:opacity-80"
+															title="View screenshot"
+															onclick={() => {
+																if (expandedScreenshots.has(log.id)) {
+																	expandedScreenshots.delete(log.id);
+																} else {
+																	expandedScreenshots.add(log.id);
+																}
+															}}
+														>
+															<CameraIcon class="size-3" />
+														</button>
 													{/if}
-												</p>
+												</div>
+												{#if hasScreenshot(log) && expandedScreenshots.has(log.id)}
+													{@const src = screenshotUrl(log.meta?.screenshotPath as string)}
+													<button
+														type="button"
+														class="mt-1 block cursor-zoom-in overflow-hidden rounded border border-surface-200-800"
+														onclick={() => (lightboxSrc = src)}
+													>
+														<img
+															{src}
+															alt="Screenshot after {log.meta?.toolId ?? 'action'}"
+															class="max-h-32 w-full object-contain"
+															loading="lazy"
+														/>
+													</button>
+												{/if}
 											</div>
 											<span class="shrink-0 text-[9px] tabular-nums opacity-30">
 												{formatTime(log.created_at)}
@@ -754,3 +826,35 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Screenshot lightbox overlay (portal-style, outside all loops) -->
+{#if lightboxSrc}
+	<div
+		role="dialog"
+		aria-label="Screenshot preview"
+		aria-modal="true"
+		tabindex="-1"
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+		onclick={() => (lightboxSrc = null)}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') lightboxSrc = null;
+		}}
+	>
+		<button
+			type="button"
+			class="absolute top-4 right-4 rounded-full bg-surface-900/80 p-2 text-white hover:bg-surface-700"
+			onclick={(e) => {
+				e.stopPropagation();
+				lightboxSrc = null;
+			}}
+		>
+			<XIcon class="size-5" />
+		</button>
+		<img
+			src={lightboxSrc}
+			alt="Screenshot preview"
+			role="presentation"
+			class="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl"
+		/>
+	</div>
+{/if}

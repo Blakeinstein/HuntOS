@@ -10,6 +10,9 @@
 //
 // Solution: use underscore-separated keys here that exactly match what the LLM will
 // emit, and update all prompt Tool Reference tables to use the same underscore names.
+//
+// Vision tools (annotated screenshots) use Mastra's `toModelOutput` to return
+// image data alongside text so vision-capable models can "see" the page.
 
 import {
 	openUrl,
@@ -68,6 +71,8 @@ import {
 
 import { listTabs, newTab, switchTab, closeTab, switchToFrame, switchToMainFrame } from './tabs';
 
+import { screenshotAnnotated, observePage } from './vision';
+
 // Individual exports for selective usage
 export {
 	// Navigation
@@ -123,7 +128,10 @@ export {
 	switchTab,
 	closeTab,
 	switchToFrame,
-	switchToMainFrame
+	switchToMainFrame,
+	// Vision
+	screenshotAnnotated,
+	observePage
 };
 
 /**
@@ -202,5 +210,8 @@ export const browserTools = {
 	browser_switch_tab: switchTab,
 	browser_close_tab: closeTab,
 	browser_switch_frame: switchToFrame,
-	browser_main_frame: switchToMainFrame
+	browser_main_frame: switchToMainFrame,
+	// Vision
+	browser_screenshot_annotated: screenshotAnnotated,
+	browser_observe_page: observePage
 } as const;

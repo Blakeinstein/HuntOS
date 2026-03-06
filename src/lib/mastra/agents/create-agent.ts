@@ -14,6 +14,11 @@
 //         "ollama/llama3.2"
 //         "z-ai/glm-4.7-flash"
 
+// Apply the CoreToolBuilder patch before any agent or tool is constructed.
+// This ensures `toModelOutput` (used by vision tools) survives the
+// Tool → CoreTool conversion inside makeCoreTool().
+import '../tools/patch-core-tool-builder';
+
 import { Agent } from '@mastra/core/agent';
 import type { AgentConfig, ToolsInput } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
