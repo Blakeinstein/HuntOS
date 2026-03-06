@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 // NOTE: You'll need to install an IMAP client library, e.g., `npm install mail-parser imap-simple`
 // For the purpose of this file, we'll assume a client with a similar API exists.
 // Let's define a placeholder for the client and message types.
@@ -91,9 +92,9 @@ export class EmailMonitorService {
 
 		const result = await this.db.run(
 			`
-      INSERT INTO email_accounts (user_id, provider, host, port, username, password_encrypted, is_default, created_at)
-      VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
-      `,
+	      INSERT INTO email_accounts (user_id, provider, host, port, username, password_encrypted, is_default, created_at)
+	      VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+	      `,
 			[provider, host, port, username, encryptedPassword, isDefault ? 1 : 0]
 		);
 
@@ -260,23 +261,28 @@ export class EmailMonitorService {
 				`SELECT MAX(order_index) as max FROM swimlanes`
 			);
 			const result = await this.db.run(
-				`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 1, ?, datetime('now'))`,
-				[statusUpdate.status, `${statusUpdate.status} applications`, (maxOrder?.max || 0) + 1]
+				`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 1, ?, ?)`,
+				[
+					statusUpdate.status,
+					`${statusUpdate.status} applications`,
+					(maxOrder?.max || 0) + 1,
+					nowIso()
+				]
 			);
 			swimlane = { id: Number(result.lastInsertRowid) };
 		}
 
 		await this.db.run(
-			`UPDATE applications SET status_swimlane_id = ?, updated_at = datetime('now') WHERE id = ?`,
-			[swimlane.id, applicationId]
+			`UPDATE applications SET status_swimlane_id = ?, updated_at = ? WHERE id = ?`,
+			[swimlane.id, nowIso(), applicationId]
 		);
 		await this.db.run(
-			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, 'email_monitor', ?, datetime('now'))`,
-			[applicationId, swimlane.id, `Email subject: ${email.subject}`]
+			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, 'email_monitor', ?, ?)`,
+			[applicationId, swimlane.id, `Email subject: ${email.subject}`, nowIso()]
 		);
 		await this.db.run(
-			`UPDATE email_messages SET processed = 1, processed_at = datetime('now'), status_update = ? WHERE id = ?`,
-			[statusUpdate.status, emailId]
+			`UPDATE email_messages SET processed = 1, processed_at = ?, status_update = ? WHERE id = ?`,
+			[nowIso(), statusUpdate.status, emailId]
 		);
 	}
 

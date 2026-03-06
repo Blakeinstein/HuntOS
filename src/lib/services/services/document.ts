@@ -4,6 +4,7 @@
 // vector storage/retrieval (via sqlite-vec).
 
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 import type { AuditLogService } from './auditLog';
 import { MDocument } from '@mastra/rag';
 import { embedMany, embed } from 'ai';
@@ -153,10 +154,11 @@ export class DocumentService {
 			this.upsertVectors(chunkIds, embeddings);
 
 			// 6. Update chunk_count on the document
-			this.db.run(
-				`UPDATE documents SET chunk_count = ?, updated_at = datetime('now') WHERE id = ?`,
-				[chunks.length, documentId]
-			);
+			this.db.run(`UPDATE documents SET chunk_count = ?, updated_at = ? WHERE id = ?`, [
+				chunks.length,
+				nowIso(),
+				documentId
+			]);
 
 			finishAudit({
 				status: 'success',

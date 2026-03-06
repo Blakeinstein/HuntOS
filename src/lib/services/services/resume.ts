@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 import { ProfileService, type ProfileData } from './profile';
 
 export interface Resume {
@@ -45,10 +46,10 @@ export class ResumeService {
 	): Promise<number> {
 		const result = await this.db.run(
 			`
-      INSERT INTO resumes (application_id, content, job_description_hash, created_at)
-      VALUES (?, ?, ?, datetime('now'))
-      `,
-			[applicationId, content, jobDescriptionHash]
+	      INSERT INTO resumes (application_id, content, job_description_hash, created_at)
+	      VALUES (?, ?, ?, ?)
+	      `,
+			[applicationId, content, jobDescriptionHash, nowIso()]
 		);
 
 		return Number(result.lastInsertRowid);

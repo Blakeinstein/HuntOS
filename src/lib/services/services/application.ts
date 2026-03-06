@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 export interface Application {
 	id: number;
@@ -152,9 +153,10 @@ export class ApplicationService {
 
 		const defaultSwimlaneId = initialSwimlaneId || (await this.getDefaultBacklogSwimlaneId());
 
+		const now = nowIso();
 		const sql = `
       INSERT INTO applications (title, company, job_description_url, job_description, status_swimlane_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
 
 		const result = await this.db.run(sql, [
@@ -162,13 +164,15 @@ export class ApplicationService {
 			company,
 			job_description_url || null,
 			job_description || null,
-			defaultSwimlaneId
+			defaultSwimlaneId,
+			now,
+			now
 		]);
 
 		// Log history entry
 		await this.db.run(
-			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, 'system', 'Application created', datetime('now'))`,
-			[result.lastInsertRowid, defaultSwimlaneId]
+			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, 'system', 'Application created', ?)`,
+			[result.lastInsertRowid, defaultSwimlaneId, nowIso()]
 		);
 
 		return Number(result.lastInsertRowid);
@@ -193,14 +197,14 @@ export class ApplicationService {
 		}
 
 		await this.db.run(
-			`UPDATE applications SET status_swimlane_id = ?, updated_at = datetime('now') WHERE id = ?`,
-			[newSwimlaneId, applicationId]
+			`UPDATE applications SET status_swimlane_id = ?, updated_at = ? WHERE id = ?`,
+			[newSwimlaneId, nowIso(), applicationId]
 		);
 
 		// Log history entry
 		await this.db.run(
-			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
-			[applicationId, newSwimlaneId, changedBy, reason || 'Swimlane changed']
+			`INSERT INTO application_history (application_id, swimlane_id, changed_by, reason, created_at) VALUES (?, ?, ?, ?, ?)`,
+			[applicationId, newSwimlaneId, changedBy, reason || 'Swimlane changed', nowIso()]
 		);
 	}
 
@@ -212,23 +216,26 @@ export class ApplicationService {
 		fields: Record<string, string>
 	): Promise<void> {
 		for (const [fieldName, fieldValue] of Object.entries(fields)) {
+			const fieldNow = nowIso();
 			await this.db.run(
 				`
         INSERT INTO application_fields (application_id, field_name, field_value, is_required, status, created_at, updated_at)
-        VALUES (?, ?, ?, 0, 'filled', datetime('now'), datetime('now'))
+        VALUES (?, ?, ?, 0, 'filled', ?, ?)
         ON CONFLICT(application_id, field_name) DO UPDATE SET
           field_value = excluded.field_value,
           status = 'filled',
-          updated_at = datetime('now')
+          updated_at = excluded.updated_at
       `,
-				[applicationId, fieldName, fieldValue || null]
+				[applicationId, fieldName, fieldValue || null, fieldNow, fieldNow]
 			);
 		}
 
-		await this.db.run(
-			`UPDATE applications SET updated_at = datetime('now'), last_activity = datetime('now') WHERE id = ?`,
-			[applicationId]
-		);
+		const activityNow = nowIso();
+		await this.db.run(`UPDATE applications SET updated_at = ?, last_activity = ? WHERE id = ?`, [
+			activityNow,
+			activityNow,
+			applicationId
+		]);
 	}
 
 	/**

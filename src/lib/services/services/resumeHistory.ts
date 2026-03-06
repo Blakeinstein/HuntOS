@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 import type { ResumeData } from '../resume/schema';
 import type { PdfService, PdfConversionOptions } from './pdfService';
 import fs from 'fs';
@@ -182,7 +183,7 @@ export class ResumeHistoryService {
 		const result = this.db.run(
 			`INSERT INTO resume_history
 				(name, job_description, template_id, template_name, model, data, file_path, pdf_path, duration_ms, application_id, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				opts.name,
 				opts.jobDescription,
@@ -193,7 +194,8 @@ export class ResumeHistoryService {
 				relativePath,
 				null, // pdf_path — generated on demand via generatePdf()
 				opts.durationMs ?? null,
-				opts.applicationId ?? null
+				opts.applicationId ?? null,
+				nowIso()
 			]
 		);
 

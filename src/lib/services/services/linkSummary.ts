@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ export class LinkSummaryService {
 		this.db.run(
 			`INSERT INTO link_summaries
 				(link_title, link_url, summary, summary_type, status, error_message, generated_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(link_title) DO UPDATE SET
 				link_url        = excluded.link_url,
 				summary         = excluded.summary,
@@ -128,7 +129,7 @@ export class LinkSummaryService {
 				status          = excluded.status,
 				error_message   = excluded.error_message,
 				generated_at    = excluded.generated_at,
-				updated_at      = datetime('now')`,
+				updated_at      = excluded.updated_at`,
 			[
 				opts.link_title,
 				opts.link_url,
@@ -136,7 +137,8 @@ export class LinkSummaryService {
 				opts.summary_type,
 				status,
 				error_message,
-				generated_at
+				generated_at,
+				nowIso()
 			]
 		);
 
@@ -149,9 +151,9 @@ export class LinkSummaryService {
 	markRunning(title: string): void {
 		this.db.run(
 			`UPDATE link_summaries
-			 SET status = 'running', error_message = NULL, updated_at = datetime('now')
+			 SET status = 'running', error_message = NULL, updated_at = ?
 			 WHERE lower(link_title) = ?`,
-			[this.normaliseTitle(title)]
+			[nowIso(), this.normaliseTitle(title)]
 		);
 	}
 
@@ -164,10 +166,11 @@ export class LinkSummaryService {
 			`UPDATE link_summaries
 			 SET status = 'needs_login',
 			     error_message = ?,
-			     updated_at = datetime('now')
+			     updated_at = ?
 			 WHERE lower(link_title) = ?`,
 			[
 				message ?? 'Please log in to this site in the browser, then click Retry.',
+				nowIso(),
 				this.normaliseTitle(title)
 			]
 		);
@@ -182,10 +185,10 @@ export class LinkSummaryService {
 			 SET status       = 'done',
 			     summary      = ?,
 			     error_message = NULL,
-			     generated_at = datetime('now'),
-			     updated_at   = datetime('now')
+			     generated_at = ?,
+			     updated_at   = ?
 			 WHERE lower(link_title) = ?`,
-			[summary, this.normaliseTitle(title)]
+			[summary, nowIso(), nowIso(), this.normaliseTitle(title)]
 		);
 	}
 
@@ -195,9 +198,9 @@ export class LinkSummaryService {
 	markError(title: string, errorMessage: string): void {
 		this.db.run(
 			`UPDATE link_summaries
-			 SET status = 'error', error_message = ?, updated_at = datetime('now')
+			 SET status = 'error', error_message = ?, updated_at = ?
 			 WHERE lower(link_title) = ?`,
-			[errorMessage, this.normaliseTitle(title)]
+			[errorMessage, nowIso(), this.normaliseTitle(title)]
 		);
 	}
 
@@ -217,9 +220,9 @@ export class LinkSummaryService {
 	resetToPending(title: string): void {
 		this.db.run(
 			`UPDATE link_summaries
-			 SET status = 'pending', error_message = NULL, updated_at = datetime('now')
+			 SET status = 'pending', error_message = NULL, updated_at = ?
 			 WHERE lower(link_title) = ?`,
-			[this.normaliseTitle(title)]
+			[nowIso(), this.normaliseTitle(title)]
 		);
 	}
 }

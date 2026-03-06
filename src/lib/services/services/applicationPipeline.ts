@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -93,8 +94,8 @@ export class ApplicationPipelineService {
 		const result = this.db.run(
 			`INSERT INTO application_pipeline_runs
 				(application_id, status, current_step, steps_completed, started_at)
-			 VALUES (?, 'running', 'research', '[]', datetime('now'))`,
-			[applicationId]
+			 VALUES (?, 'running', 'research', '[]', ?)`,
+			[applicationId, nowIso()]
 		);
 		const id = Number(result.lastInsertRowid);
 		return this.getById(id)!;
@@ -138,9 +139,9 @@ export class ApplicationPipelineService {
 	complete(runId: number): void {
 		this.db.run(
 			`UPDATE application_pipeline_runs
-			 SET status = 'completed', completed_at = datetime('now'), current_step = NULL
+			 SET status = 'completed', completed_at = ?, current_step = NULL
 			 WHERE id = ?`,
-			[runId]
+			[nowIso(), runId]
 		);
 	}
 
@@ -150,9 +151,9 @@ export class ApplicationPipelineService {
 	fail(runId: number, errorMessage: string): void {
 		this.db.run(
 			`UPDATE application_pipeline_runs
-			 SET status = 'failed', error_message = ?, completed_at = datetime('now')
+			 SET status = 'failed', error_message = ?, completed_at = ?
 			 WHERE id = ?`,
-			[errorMessage, runId]
+			[errorMessage, nowIso(), runId]
 		);
 	}
 
@@ -171,9 +172,9 @@ export class ApplicationPipelineService {
 
 		this.db.run(
 			`UPDATE application_pipeline_runs
-			 SET status = 'cancelled', error_message = 'Cancelled by user', completed_at = datetime('now')
+			 SET status = 'cancelled', error_message = 'Cancelled by user', completed_at = ?
 			 WHERE id = ?`,
-			[runId]
+			[nowIso(), runId]
 		);
 
 		this.addStepLog(runId, run.current_step ?? 'research', 'warn', 'Pipeline cancelled by user');
@@ -208,8 +209,8 @@ export class ApplicationPipelineService {
 		this.db.run(
 			`INSERT INTO pipeline_step_logs
 				(pipeline_run_id, step, level, message, meta, created_at)
-			 VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-			[runId, step, level, message, meta ? JSON.stringify(meta) : null]
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			[runId, step, level, message, meta ? JSON.stringify(meta) : null, nowIso()]
 		);
 	}
 

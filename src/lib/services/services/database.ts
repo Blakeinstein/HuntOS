@@ -102,8 +102,8 @@ export class Database {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
       );
 
       CREATE TABLE IF NOT EXISTS applications (
@@ -113,8 +113,8 @@ export class Database {
         job_description_url TEXT,
         job_description TEXT,
         status_swimlane_id INTEGER NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         last_activity DATETIME,
         FOREIGN KEY (status_swimlane_id) REFERENCES swimlanes(id)
       );
@@ -125,7 +125,7 @@ export class Database {
         description TEXT,
         is_custom BOOLEAN DEFAULT 1,
         order_index INTEGER NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
       );
 
       CREATE TABLE IF NOT EXISTS profiles (
@@ -133,8 +133,8 @@ export class Database {
         user_id INTEGER NOT NULL,
         key TEXT NOT NULL,
         value TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (user_id) REFERENCES users(id),
         UNIQUE(user_id, key)
       );
@@ -146,8 +146,8 @@ export class Database {
         field_value TEXT,
         is_required BOOLEAN DEFAULT 0,
         status TEXT DEFAULT 'pending', -- pending, filled, missing, user_input_required
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
         UNIQUE(application_id, field_name)
       );
@@ -157,7 +157,7 @@ export class Database {
         application_id INTEGER NOT NULL,
         content TEXT NOT NULL,
         job_description_hash TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
       );
 
@@ -170,7 +170,7 @@ export class Database {
         username TEXT NOT NULL,
         password_encrypted TEXT NOT NULL,
         is_default BOOLEAN DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (user_id) REFERENCES users(id)
       );
 
@@ -187,7 +187,7 @@ export class Database {
         last_scraped_page_url TEXT,
         last_page_scraped_at DATETIME,
         page_retention_days INTEGER NOT NULL DEFAULT 3,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
       );
 
       CREATE TABLE IF NOT EXISTS job_board_credentials (
@@ -196,8 +196,8 @@ export class Database {
         username TEXT,
         password_encrypted TEXT,
         session_cookie TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (job_board_id) REFERENCES job_boards(id) ON DELETE CASCADE
       );
 
@@ -226,7 +226,7 @@ export class Database {
         swimlane_id INTEGER NOT NULL,
         changed_by TEXT NOT NULL, -- 'system', 'user', 'email_monitor'
         reason TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE,
         FOREIGN KEY (swimlane_id) REFERENCES swimlanes(id)
       );
@@ -240,7 +240,7 @@ export class Database {
         detail TEXT,                     -- longer message / JSON payload
         meta TEXT,                       -- JSON blob for structured data (job board id, url, counts, etc.)
         duration_ms INTEGER,            -- how long the operation took
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
       );
 
       CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);
@@ -258,8 +258,8 @@ export class Database {
         raw_text TEXT NOT NULL,                     -- full extracted plain-text
         size_bytes INTEGER NOT NULL DEFAULT 0,
         chunk_count INTEGER NOT NULL DEFAULT 0,     -- populated after chunking
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (user_id) REFERENCES users(id)
       );
 
@@ -270,7 +270,7 @@ export class Database {
         chunk_index INTEGER NOT NULL,       -- ordinal position in the document
         text TEXT NOT NULL,                  -- the chunk text
         metadata TEXT,                       -- JSON blob (headers, page number, etc.)
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
       );
 
@@ -285,7 +285,7 @@ export class Database {
         title TEXT NOT NULL,
         content TEXT NOT NULL,
         meta TEXT,                             -- JSON blob for structured data
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
       );
 
@@ -303,7 +303,7 @@ export class Database {
         error_message TEXT,
         started_at DATETIME,
         completed_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
       );
 
@@ -319,7 +319,7 @@ export class Database {
         level TEXT NOT NULL DEFAULT 'info',         -- 'info', 'warn', 'error', 'progress'
         message TEXT NOT NULL,
         meta TEXT,                                  -- optional JSON metadata
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
         FOREIGN KEY (pipeline_run_id) REFERENCES application_pipeline_runs(id) ON DELETE CASCADE
       );
 
@@ -338,8 +338,8 @@ export class Database {
         status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'running', 'done', 'error'
         error_message TEXT,
         generated_at DATETIME,             -- when the last successful summary was produced
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+        updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
       );
 
       CREATE INDEX IF NOT EXISTS idx_link_summaries_title ON link_summaries(link_title);

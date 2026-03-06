@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -73,10 +74,11 @@ export class ResumeTemplateService {
 
 		if (!existing) {
 			const defaultContent = this.loadDefaultTemplateFromDisk();
+			const now = nowIso();
 			this.db.run(
 				`INSERT INTO resume_templates (name, content, is_default, created_at, updated_at)
-				 VALUES (?, ?, 1, datetime('now'), datetime('now'))`,
-				['Default', defaultContent]
+				 VALUES (?, ?, 1, ?, ?)`,
+				['Default', defaultContent, now, now]
 			);
 		}
 
@@ -144,10 +146,11 @@ export class ResumeTemplateService {
 	 * The `is_default` flag is always false for user-created templates.
 	 */
 	create(input: UpsertTemplateInput): ResumeTemplate {
+		const now = nowIso();
 		const result = this.db.run(
 			`INSERT INTO resume_templates (name, content, is_default, created_at, updated_at)
-			 VALUES (?, ?, 0, datetime('now'), datetime('now'))`,
-			[input.name.trim(), input.content]
+			 VALUES (?, ?, 0, ?, ?)`,
+			[input.name.trim(), input.content, now, now]
 		);
 
 		const id = Number(result.lastInsertRowid);
@@ -168,10 +171,12 @@ export class ResumeTemplateService {
 		const newName = existing.is_default ? existing.name : (input.name?.trim() ?? existing.name);
 		const newContent = input.content ?? existing.content;
 
-		this.db.run(
-			`UPDATE resume_templates SET name = ?, content = ?, updated_at = datetime('now') WHERE id = ?`,
-			[newName, newContent, id]
-		);
+		this.db.run(`UPDATE resume_templates SET name = ?, content = ?, updated_at = ? WHERE id = ?`, [
+			newName,
+			newContent,
+			nowIso(),
+			id
+		]);
 
 		return this.getById(id)!;
 	}
@@ -194,10 +199,11 @@ export class ResumeTemplateService {
 		const defaultTpl = this.getDefault();
 		const freshContent = this.loadDefaultTemplateFromDisk();
 
-		this.db.run(
-			`UPDATE resume_templates SET content = ?, updated_at = datetime('now') WHERE id = ?`,
-			[freshContent, defaultTpl.id]
-		);
+		this.db.run(`UPDATE resume_templates SET content = ?, updated_at = ? WHERE id = ?`, [
+			freshContent,
+			nowIso(),
+			defaultTpl.id
+		]);
 
 		return this.getById(defaultTpl.id)!;
 	}

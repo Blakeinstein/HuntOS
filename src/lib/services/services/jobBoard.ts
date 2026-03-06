@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 export interface JobBoardConfig {
 	id: number;
@@ -109,12 +110,13 @@ export class JobBoardService {
 			pageRetentionDays = 3
 		} = config;
 
+		const now = nowIso();
 		const result = await this.db.run(
 			`
       INSERT INTO job_boards (name, base_url, check_interval_minutes, max_listings_per_scrape, page_retention_days, last_checked, next_check, is_enabled, created_at)
-      VALUES (?, ?, ?, ?, ?, NULL, datetime('now'), 1, datetime('now'))
+      VALUES (?, ?, ?, ?, ?, NULL, ?, 1, ?)
       `,
-			[name, baseUrl, checkIntervalMinutes, maxListingsPerScrape, pageRetentionDays]
+			[name, baseUrl, checkIntervalMinutes, maxListingsPerScrape, pageRetentionDays, now, now]
 		);
 
 		return Number(result.lastInsertRowid);
@@ -195,8 +197,8 @@ export class JobBoardService {
 	 */
 	async updatePaginationState(id: number, page: number, pageUrl: string): Promise<void> {
 		await this.db.run(
-			`UPDATE job_boards SET last_scraped_page = ?, last_scraped_page_url = ?, last_page_scraped_at = datetime('now') WHERE id = ?`,
-			[page, pageUrl, id]
+			`UPDATE job_boards SET last_scraped_page = ?, last_scraped_page_url = ?, last_page_scraped_at = ? WHERE id = ?`,
+			[page, pageUrl, nowIso(), id]
 		);
 	}
 
@@ -313,12 +315,13 @@ export class JobBoardService {
 			descriptionParts.length > 0 ? descriptionParts.join('\n') : job.job_description || null;
 
 		// Create application — store all listing details directly on the record
+		const now = nowIso();
 		const result = await this.db.run(
 			`
       INSERT INTO applications (title, company, job_description_url, job_description, status_swimlane_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
-			[job.title, job.company, job.job_description_url, fullDescription, backlog.id]
+			[job.title, job.company, job.job_description_url, fullDescription, backlog.id, now, now]
 		);
 
 		return { id: Number(result.lastInsertRowid), isNew: true };

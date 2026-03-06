@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 import type { Application } from './application';
 
 /** Swimlane names that cannot be deleted by the user. */
@@ -91,8 +92,8 @@ export class SwimlaneService {
 		const orderIndex = (maxOrder?.max || 0) + 1;
 
 		const result = await this.db.run(
-			`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 1, ?, datetime('now'))`,
-			[name, description || null, orderIndex]
+			`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 1, ?, ?)`,
+			[name, description || null, orderIndex, nowIso()]
 		);
 
 		return Number(result.lastInsertRowid);
@@ -190,8 +191,8 @@ export class SwimlaneService {
 		for (let i = 0; i < defaultSwimlanes.length; i++) {
 			const swimlane = defaultSwimlanes[i];
 			await this.db.run(
-				`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 0, ?, datetime('now'))`,
-				[swimlane.name, swimlane.description, i]
+				`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES (?, ?, 0, ?, ?)`,
+				[swimlane.name, swimlane.description, i, nowIso()]
 			);
 		}
 	}
@@ -212,8 +213,8 @@ export class SwimlaneService {
 		);
 		const order = (maxOrder?.max ?? 0) + 1;
 		await this.db.run(
-			`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES ('In Progress', 'Applications currently being processed by the pipeline', 0, ?, datetime('now'))`,
-			[order]
+			`INSERT INTO swimlanes (name, description, is_custom, order_index, created_at) VALUES ('In Progress', 'Applications currently being processed by the pipeline', 0, ?, ?)`,
+			[order, nowIso()]
 		);
 	}
 

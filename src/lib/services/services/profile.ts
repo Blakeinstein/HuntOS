@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 /** A single user-managed link with title, URL, and optional description. */
 export interface ProfileLink {
@@ -147,15 +148,16 @@ export class ProfileService {
 	async updateProfile(key: ProfileKey, value: string | string[]): Promise<void> {
 		const serializedValue = Array.isArray(value) ? JSON.stringify(value) : value;
 
+		const now = nowIso();
 		await this.db.run(
 			`
       INSERT INTO profiles (user_id, key, value, created_at, updated_at)
-      VALUES (1, ?, ?, datetime('now'), datetime('now'))
+      VALUES (1, ?, ?, ?, ?)
       ON CONFLICT(user_id, key) DO UPDATE SET
         value = excluded.value,
-        updated_at = datetime('now')
+        updated_at = excluded.updated_at
     `,
-			[key, serializedValue]
+			[key, serializedValue, now, now]
 		);
 	}
 

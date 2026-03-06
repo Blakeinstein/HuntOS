@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 /**
  * Supported audit log categories.
@@ -117,8 +118,8 @@ export class AuditLogService {
 	 */
 	create(opts: CreateAuditLogOptions): number {
 		const result = this.db.run(
-			`INSERT INTO audit_logs (category, agent_id, status, title, detail, meta, duration_ms)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO audit_logs (category, agent_id, status, title, detail, meta, duration_ms, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				opts.category,
 				opts.agent_id ?? null,
@@ -126,7 +127,8 @@ export class AuditLogService {
 				opts.title,
 				opts.detail ?? null,
 				opts.meta ? JSON.stringify(opts.meta) : null,
-				opts.duration_ms ?? null
+				opts.duration_ms ?? null,
+				nowIso()
 			]
 		);
 		return Number(result.lastInsertRowid);

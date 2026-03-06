@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import { nowIso } from '$lib/services/helpers/nowIso';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -107,12 +108,12 @@ export class AppSettingsService {
 	private seedDefaults(): void {
 		const insert = this.db.raw.prepare(
 			`INSERT OR IGNORE INTO app_settings (key, value, updated_at)
-			 VALUES (?, ?, datetime('now'))`
+			 VALUES (?, ?, ?)`
 		);
 
 		const seed = this.db.raw.transaction(() => {
 			for (const [key, value] of Object.entries(DEFAULTS)) {
-				insert.run(key, String(value));
+				insert.run(key, String(value), nowIso());
 			}
 		});
 
@@ -135,9 +136,9 @@ export class AppSettingsService {
 	set<K extends keyof AppSettingsMap>(key: K, value: AppSettingsMap[K]): void {
 		this.db.run(
 			`INSERT INTO app_settings (key, value, updated_at)
-			 VALUES (?, ?, datetime('now'))
+			 VALUES (?, ?, ?)
 			 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-			[key, String(value)]
+			[key, String(value), nowIso()]
 		);
 	}
 
@@ -157,9 +158,9 @@ export class AppSettingsService {
 	setRaw(key: string, value: string): void {
 		this.db.run(
 			`INSERT INTO app_settings (key, value, updated_at)
-			 VALUES (?, ?, datetime('now'))
+			 VALUES (?, ?, ?)
 			 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-			[key, value]
+			[key, value, nowIso()]
 		);
 	}
 

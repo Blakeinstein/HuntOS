@@ -273,16 +273,16 @@
 	}
 
 	async function deleteFile(entry: FileEntry) {
-		deletingFile = entry.name;
+		deletingFile = entry.relPath;
 		try {
 			const res = await fetch('/api/admin/files', {
 				method: 'DELETE',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ bucket: entry.bucket, file: entry.name })
+				body: JSON.stringify({ bucket: entry.bucket, file: entry.relPath })
 			});
 			if (res.ok) {
-				bucketFiles = bucketFiles.filter((f) => f.name !== entry.name);
-				if (previewFile?.name === entry.name) {
+				bucketFiles = bucketFiles.filter((f) => f.relPath !== entry.relPath);
+				if (previewFile?.relPath === entry.relPath) {
 					previewFile = null;
 					previewUrl = null;
 					previewText = null;
@@ -817,14 +817,14 @@
 							</div>
 						{:else}
 							<div class="max-h-[calc(100vh-360px)] space-y-0.5 overflow-y-auto">
-								{#each bucketFiles as file (file.name)}
+								{#each bucketFiles as file (file.relPath)}
 									{@const FIcon = fileIcon(file.ext)}
 									<!-- Use div+role so we can nest the delete button without invalid HTML -->
 									<div
 										role="button"
 										tabindex="0"
 										class="group flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors
-												{previewFile?.name === file.name ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
+												{previewFile?.relPath === file.relPath ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
 										onclick={() => previewFileEntry(file)}
 										onkeydown={(e) => e.key === 'Enter' && previewFileEntry(file)}
 									>
@@ -955,7 +955,7 @@
 							disabled={deletingFile === deleteFileTarget.name}
 							onclick={() => deleteFileTarget && deleteFile(deleteFileTarget)}
 						>
-							{#if deletingFile === deleteFileTarget.name}
+							{#if deletingFile === deleteFileTarget.relPath}
 								<Loader2Icon class="size-4 animate-spin" />
 							{:else}
 								<TrashIcon class="size-4" />

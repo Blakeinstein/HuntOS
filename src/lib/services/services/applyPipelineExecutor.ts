@@ -1732,8 +1732,8 @@ export class ApplyPipelineExecutor {
 				screenshotTaken: appResult.screenshot_taken
 			};
 		} catch (error) {
-			if (error instanceof CancellationError) {
-				// Best-effort browser cleanup on cancel
+			if (error instanceof CancellationError || error instanceof ApplicationClosedError) {
+				// Best-effort browser cleanup on cancel/closed
 				try {
 					await browserExec(['close']);
 				} catch {

@@ -402,17 +402,57 @@ Execute form filling in a systematic order:
 1. Take a `browser_snapshot` (with `interactive: true` for a focused view) to see all available fields and their current state.
 2. For each field on the current page/step:
    a. Identify the element ref (e.g. `@e5`) or CSS selector from the snapshot.
-   b. Determine the field type (text input, textarea, select, checkbox, radio, file upload) from the snapshot's accessibility tree.
+   b. **Determine the exact input type** from the snapshot's accessibility tree — look for `type=`, `inputmode=`, `role=`, or descriptive `aria-label` / `placeholder` attributes. This is mandatory before filling. The type determines the exact format the value must be in (see **Input Format Rules** below).
    c. Find the corresponding profile data using the mapping above.
-   d. If data is available:
-      - **Text/textarea:** Call `browser_fill` with `selector` and `text` parameters.
-      - **Select dropdown:** Call `browser_get_text` on the `<select>` to read options, then call `browser_select` with the matching option value.
-      - **Checkbox:** Call `browser_check` with the checkbox selector.
-      - **Radio button:** Call `browser_click` on the correct radio option.
-      - **File upload:** Call `browser_upload { selector: "@eN", files: "<absolute-path>" }`. NEVER use `browser_click` or `browser_fill` for file upload elements.
+   d. If data is available, fill according to the field type — see **Input Format Rules** immediately below.
    e. If data is NOT available and the field is required: Record it as `missing`.
    f. If data is NOT available and the field is optional: Skip it.
-3. After filling all fields on the current page, take a `browser_snapshot` to verify the state. Use `browser_get_value` to spot-check critical fields (email, name).
+
+#### Input Format Rules
+
+**You must format values to match the input type exactly before calling `browser_fill`. Passing the wrong format (e.g. a word instead of a digit, a decimal instead of an integer) will silently fail or produce an inline validation error that blocks form submission.**
+
+| Input type / pattern | Required format | Examples | Never do |
+|---|---|---|---|
+| `type="number"` or `inputmode="numeric"` | Plain digits only — no words, no commas, no units | `"5"` `"10"` `"3"` | ~~`"five"`~~ ~~`"5.0"`~~ ~~`"5 years"`~~ |
+| `type="number"` with `step="0.1"` or `step="any"` | Decimal with `.` separator | `"3.5"` `"1.0"` | ~~`"3,5"`~~ ~~`"three and a half"`~~ |
+| `type="tel"` or phone field | Digits, spaces, `+`, `(`, `)`, `-` only — no words | `"+1 628 310 2577"` `"(628) 310-2577"` | ~~`"six two eight…"`~~ |
+| `type="email"` | Lowercase `user@domain.tld` — no spaces | `"john@example.com"` | ~~`"john at example dot com"`~~ |
+| `type="date"` | `YYYY-MM-DD` (HTML date input standard) | `"2025-06-15"` | ~~`"June 15 2025"`~~ ~~`"06/15/2025"`~~ |
+| `type="text"` with `placeholder` like `MM/DD/YYYY` | Match the placeholder format exactly | `"06/15/2025"` | ~~`"2025-06-15"`~~ |
+| `type="text"` with `placeholder` like `YYYY-MM-DD` | Match the placeholder format exactly | `"2025-06-15"` | ~~`"06/15/2025"`~~ |
+| `type="url"` | Full URL including scheme | `"https://linkedin.com/in/user"` | ~~`"linkedin.com/in/user"`~~ |
+| `type="text"` years-of-experience / count fields | Integer string — no units, no words | `"7"` `"10"` | ~~`"seven"`~~ ~~`"7 years"`~~ ~~`"7+"`~~ |
+| Salary / currency fields | Check placeholder: digits only if numeric input; otherwise match the stated format | `"120000"` or `"120,000"` per placeholder | ~~`"120k"`~~ ~~`"$120,000"`~~ unless format requires it |
+
+**Pre-fill checklist — run this mentally for every field before calling `browser_fill`:**
+1. What is the `type` attribute? Check the snapshot.
+2. Is there a `placeholder`? It shows the expected format — match it exactly.
+3. Are there `min`, `max`, or `step` attributes? Stay within those bounds.
+4. Is the value a number? Use only digits (and `.` for decimals if `step` allows). Never write the number as a word.
+5. Is the value a date? Use the format the placeholder shows. Default to `YYYY-MM-DD` for `type="date"` inputs.
+
+**Select dropdowns:** Call `browser_get_text` or `browser_get_html` on the `<select>` first to read the actual option values/text — never guess. Use `browser_select` with the exact option value string.
+
+**Checkboxes:** `browser_check` only. **Radio buttons:** `browser_click` on the specific `input[type="radio"]` ref. **File uploads:** `browser_upload` only — never `browser_click` or `browser_fill`.
+
+#### Post-Fill Inline Error Verification
+
+After filling **every individual field** (not just at the end of the page), immediately check for inline validation errors:
+
+1. Call `browser_snapshot` scoped to the field's parent element if possible, or take a full snapshot.
+2. Look for:
+   - Red border / `aria-invalid="true"` on the input
+   - An error message element near the field (commonly a `<span>` or `<div>` with class names like `error`, `invalid`, `field-error`, `helper-text--error`, or similar)
+   - A `role="alert"` or `aria-live` element that appeared after the fill
+3. If an error is detected:
+   - Call `browser_get_text` on the error element to read the exact message.
+   - Re-examine the expected format from the error text or the field's `placeholder` / `pattern` attribute.
+   - Clear the field with `browser_fill { selector: "@eN", text: "" }` and re-fill with the corrected format.
+   - If still erroring after one correction attempt, record the field as `status: "error"` with `error_reason` quoting the error message, and move on.
+4. **Never advance to the next form step while an inline error is visible on the current step.** Resolve or skip all erroring fields first.
+
+3. After filling all fields on the current page, take a `browser_snapshot` to verify the overall state. Use `browser_get_value` to spot-check critical fields (email, name, number inputs).
 4. If this is a multi-step form, use `browser_find_text` with `text: "Next"` and `action: "click"` (or `"Continue"`, `"Save & Continue"`), then call `browser_wait_load` with `state: "networkidle"` and repeat from sub-step 1.
 
 #### Using Find-and-Act for Efficient Form Filling
