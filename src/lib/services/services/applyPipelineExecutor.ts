@@ -1424,22 +1424,64 @@ export class ApplyPipelineExecutor {
 
 				if (loopResult.result) {
 					appResult = loopResult.result;
-				} else {
-					// All iterations exhausted without a valid structured result
-					const detail = loopResult.validationError
-						? `Agent JSON failed schema validation after ${loopResult.iterations} iteration(s): ${loopResult.validationError}`
-						: `Agent produced no parseable JSON after ${loopResult.iterations} iteration(s). ` +
-							`Last text: ${loopResult.lastText}`;
+				} else if (loopResult.exhausted) {
+					// ── Iteration / budget limit reached without a structured result ──
+					// The agent kept working but never returned valid JSON. Rather than
+					// trying to parse its last output, save it as a human-readable note
+					// and route the application to Action Required for manual completion.
+					const iterLabel = `${loopResult.iterations} iteration(s), ${loopResult.totalSteps} steps`;
+					const summary = loopResult.validationError
+						? `Agent reached the iteration limit (${iterLabel}) and its final JSON failed schema validation: ${loopResult.validationError}`
+						: `Agent reached the iteration limit (${iterLabel}) without returning a structured result.`;
 
+					this.log(runId, step, summary, 'warn');
+
+					// Persist the agent's last free-text output as an action-required note
+					// so a human can see exactly where the agent got to.
+					if (loopResult.lastText) {
+						this.resourceService.create({
+							applicationId: application.id,
+							resourceType: 'note',
+							title: 'Agent Output — Manual Review Required',
+							content:
+								`The application agent exhausted its step budget without completing the form.\n\n` +
+								`**Summary:** ${summary}\n\n` +
+								`**Agent's last output:**\n\n${loopResult.lastText}`,
+							meta: {
+								pipelineRunId: runId,
+								iterations: loopResult.iterations,
+								totalSteps: loopResult.totalSteps,
+								totalToolCalls: loopResult.totalToolCalls,
+								validationError: loopResult.validationError ?? null,
+								exhausted: true
+							}
+						});
+					}
+
+					agentStartAudit({
+						status: 'warning',
+						detail: summary,
+						meta: {
+							iterations: loopResult.iterations,
+							totalSteps: loopResult.totalSteps,
+							totalToolCalls: loopResult.totalToolCalls,
+							validationError: loopResult.validationError,
+							exhausted: true
+						}
+					});
+
+					throw new Error(summary);
+				} else {
+					// Loop returned null without exhausting — should not normally happen,
+					// but treat it the same as exhausted for safety.
+					const detail = `Agent produced no result after ${loopResult.iterations} iteration(s).`;
 					agentStartAudit({
 						status: 'error',
 						detail,
 						meta: {
 							iterations: loopResult.iterations,
 							totalSteps: loopResult.totalSteps,
-							totalToolCalls: loopResult.totalToolCalls,
-							validationError: loopResult.validationError,
-							textPreview: loopResult.lastText
+							totalToolCalls: loopResult.totalToolCalls
 						}
 					});
 					throw new Error(detail);

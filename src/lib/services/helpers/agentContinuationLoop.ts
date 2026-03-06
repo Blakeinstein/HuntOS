@@ -119,6 +119,14 @@ export interface ContinuationLoopResult<T> {
 	 * If schema validation failed, the issues string.
 	 */
 	validationError?: string;
+
+	/**
+	 * True when the loop ran out of iterations or step budget without ever
+	 * producing a valid structured result. Distinct from a result of null
+	 * caused by an early cancellation or thrown error — this specifically
+	 * means the agent kept working but never finished.
+	 */
+	exhausted?: boolean;
 }
 
 // ── Prompts ─────────────────────────────────────────────────────────
@@ -305,6 +313,7 @@ export async function runAgentContinuationLoop<T>(
 		totalSteps,
 		totalToolCalls,
 		lastText,
-		validationError
+		validationError,
+		exhausted: true
 	};
 }
