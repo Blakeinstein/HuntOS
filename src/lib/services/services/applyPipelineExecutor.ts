@@ -757,6 +757,7 @@ export class ApplyPipelineExecutor {
 				const message = error.message;
 				const currentStep = this.pipelineService.getById(runId)?.current_step ?? 'apply';
 
+				this.pipelineService.complete(runId);
 				this.log(runId, currentStep, `Application closed: ${message}`, 'warn');
 
 				// Log as a resource for auditability

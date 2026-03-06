@@ -16,6 +16,7 @@
 		DownloadIcon,
 		ChevronLeftIcon,
 		ChevronRightIcon,
+		ChevronDownIcon,
 		XIcon,
 		AlertTriangleIcon,
 		CheckIcon,
@@ -220,6 +221,22 @@
 		modifiedAt: string;
 	}
 
+	interface ScreenshotRun {
+		run: string;
+		fileCount: number;
+		latestAt: string | null;
+		// populated after expansion
+		files?: ScreenshotFile[];
+		filesLoading?: boolean;
+	}
+
+	interface ScreenshotFile {
+		name: string;
+		relPath: string;
+		size: number;
+		modifiedAt: string;
+	}
+
 	let buckets = $state<BucketSummary[]>([]);
 
 	let selectedBucket = $state<FileBucket | null>(null);
@@ -230,6 +247,10 @@
 	let previewText = $state<string | null>(null);
 	let deletingFile = $state<string | null>(null);
 	let deleteFileTarget = $state<FileEntry | null>(null);
+
+	// ── Screenshots run-grouped state ─────────────────────────────────────────
+	let screenshotRuns = $state<ScreenshotRun[]>([]);
+	let expandedRuns = $state<Set<string>>(new Set());
 
 	async function loadBuckets() {
 		try {
@@ -246,13 +267,67 @@
 		previewFile = null;
 		previewUrl = null;
 		previewText = null;
+		screenshotRuns = [];
+		expandedRuns = new Set();
 		try {
-			const res = await fetch(`/api/admin/files?bucket=${bucket}`);
-			const data = await res.json();
-			bucketFiles = data.files ?? [];
+			if (bucket === 'screenshots') {
+				const res = await fetch('/api/admin/screenshots');
+				screenshotRuns = await res.json();
+				bucketFiles = [];
+			} else {
+				const res = await fetch(`/api/admin/files?bucket=${bucket}`);
+				const data = await res.json();
+				bucketFiles = data.files ?? [];
+			}
 		} finally {
 			bucketLoading = false;
 		}
+	}
+
+	async function toggleRun(run: ScreenshotRun) {
+		const key = run.run;
+		if (expandedRuns.has(key)) {
+			expandedRuns = new Set([...expandedRuns].filter((r) => r !== key));
+			return;
+		}
+		// Expand — load files if not yet loaded
+		expandedRuns = new Set([...expandedRuns, key]);
+		if (!run.files) {
+			// Mark as loading
+			screenshotRuns = screenshotRuns.map((r) =>
+				r.run === key ? { ...r, filesLoading: true } : r
+			);
+			try {
+				const res = await fetch(`/api/admin/screenshots?run=${encodeURIComponent(key)}`);
+				const data = await res.json();
+				screenshotRuns = screenshotRuns.map((r) =>
+					r.run === key ? { ...r, files: data.files ?? [], filesLoading: false } : r
+				);
+			} catch {
+				screenshotRuns = screenshotRuns.map((r) =>
+					r.run === key ? { ...r, files: [], filesLoading: false } : r
+				);
+			}
+		}
+	}
+
+	function screenshotFileToEntry(run: string, file: ScreenshotFile): FileEntry {
+		return {
+			name: file.name,
+			relPath: `${run}/${file.relPath}`,
+			bucket: 'screenshots',
+			size: file.size,
+			sizeHuman: humanSize(file.size),
+			mime: 'image/png',
+			ext: 'png',
+			modifiedAt: file.modifiedAt
+		};
+	}
+
+	function humanSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
 	async function previewFileEntry(entry: FileEntry) {
@@ -281,7 +356,21 @@
 				body: JSON.stringify({ bucket: entry.bucket, file: entry.relPath })
 			});
 			if (res.ok) {
-				bucketFiles = bucketFiles.filter((f) => f.relPath !== entry.relPath);
+				if (entry.bucket === 'screenshots') {
+					// Remove the file from its run group
+					screenshotRuns = screenshotRuns
+						.map((r) => ({
+							...r,
+							files: r.files?.filter((f) => `${r.run}/${f.relPath}` !== entry.relPath),
+							fileCount: r.files
+								? r.files.filter((f) => `${r.run}/${f.relPath}` !== entry.relPath).length
+								: r.fileCount - 1
+						}))
+						// Drop empty runs
+						.filter((r) => r.fileCount > 0);
+				} else {
+					bucketFiles = bucketFiles.filter((f) => f.relPath !== entry.relPath);
+				}
 				if (previewFile?.relPath === entry.relPath) {
 					previewFile = null;
 					previewUrl = null;
@@ -801,7 +890,13 @@
 							<span class="text-xs font-semibold tracking-wider uppercase opacity-50">
 								{selectedBucket}
 							</span>
-							<span class="text-xs opacity-40">{bucketFiles.length} files</span>
+							{#if selectedBucket === 'screenshots'}
+								<span class="text-xs opacity-40"
+									>{screenshotRuns.length} run{screenshotRuns.length === 1 ? '' : 's'}</span
+								>
+							{:else}
+								<span class="text-xs opacity-40">{bucketFiles.length} files</span>
+							{/if}
 						</div>
 
 						{#if bucketLoading}
@@ -809,11 +904,85 @@
 								<Loader2Icon class="size-4 animate-spin" />
 								<span class="text-sm">Loading…</span>
 							</div>
-						{:else if bucketFiles.length === 0}
+						{:else if selectedBucket === 'screenshots' ? screenshotRuns.length === 0 : bucketFiles.length === 0}
 							<div
 								class="rounded-xl border border-dashed border-surface-300-700 py-8 text-center text-sm opacity-40"
 							>
 								No files
+							</div>
+						{:else if selectedBucket === 'screenshots'}
+							<!-- Run-grouped view for screenshots -->
+							<div class="max-h-[calc(100vh-360px)] space-y-1 overflow-y-auto">
+								{#each screenshotRuns as run (run.run)}
+									{@const isExpanded = expandedRuns.has(run.run)}
+									<div class="overflow-hidden rounded-lg border border-surface-200-800">
+										<!-- Run header -->
+										<button
+											type="button"
+											class="flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-surface-200-800"
+											onclick={() => toggleRun(run)}
+										>
+											<ChevronDownIcon
+												class="size-3.5 shrink-0 opacity-50 transition-transform {isExpanded
+													? ''
+													: '-rotate-90'}"
+											/>
+											<FolderIcon class="size-4 shrink-0 text-primary-500 opacity-60" />
+											<div class="min-w-0 flex-1">
+												<div class="truncate font-mono text-xs font-medium">{run.run}</div>
+												<div class="text-[10px] opacity-40">
+													{run.fileCount} file{run.fileCount === 1 ? '' : 's'}
+													{#if run.latestAt}
+														· {new Date(run.latestAt).toLocaleDateString()}
+													{/if}
+												</div>
+											</div>
+										</button>
+
+										<!-- Run files -->
+										{#if isExpanded}
+											{#if run.filesLoading}
+												<div class="flex items-center gap-2 px-4 py-2 opacity-50">
+													<Loader2Icon class="size-3 animate-spin" />
+													<span class="text-xs">Loading…</span>
+												</div>
+											{:else if run.files && run.files.length > 0}
+												<div class="border-t border-surface-200-800 bg-surface-50-950">
+													{#each run.files as file (file.relPath)}
+														{@const entry = screenshotFileToEntry(run.run, file)}
+														<div
+															role="button"
+															tabindex="0"
+															class="group flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 pl-7 text-left transition-colors
+																{previewFile?.relPath === entry.relPath ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
+															onclick={() => previewFileEntry(entry)}
+															onkeydown={(e) => e.key === 'Enter' && previewFileEntry(entry)}
+														>
+															<ImageIcon class="size-3.5 shrink-0 opacity-50" />
+															<div class="min-w-0 flex-1">
+																<div class="truncate font-mono text-xs">{file.name}</div>
+																<div class="text-[10px] opacity-40">{humanSize(file.size)}</div>
+															</div>
+															<button
+																type="button"
+																class="btn-icon size-5 opacity-0 transition-opacity group-hover:opacity-60 hover:text-error-500"
+																onclick={(e) => {
+																	e.stopPropagation();
+																	deleteFileTarget = entry;
+																}}
+																aria-label="Delete file"
+															>
+																<TrashIcon class="size-3" />
+															</button>
+														</div>
+													{/each}
+												</div>
+											{:else}
+												<div class="px-4 py-2 text-xs opacity-40">No files</div>
+											{/if}
+										{/if}
+									</div>
+								{/each}
 							</div>
 						{:else}
 							<div class="max-h-[calc(100vh-360px)] space-y-0.5 overflow-y-auto">
