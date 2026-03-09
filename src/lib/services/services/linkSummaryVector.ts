@@ -84,7 +84,7 @@ export class LinkSummaryVectorService {
 
 		try {
 			const embedding = await this.embedSingle(text);
-			this.upsertVector(linkSummaryId, embedding);
+			this.upsertVector(BigInt(linkSummaryId), embedding);
 
 			finishAudit({
 				status: 'success',
@@ -100,6 +100,48 @@ export class LinkSummaryVectorService {
 			});
 			throw error;
 		}
+	}
+
+	/**
+	 * Wipe all existing vectors from `link_summary_vec` and re-embed every
+	 * link summary that has `status = 'done'` and non-empty summary text.
+	 *
+	 * Use this when the embedding model has changed or the vector table has
+	 * become stale/corrupt. Old vectors are deleted before new ones are
+	 * generated so the index is always consistent.
+	 *
+	 * @returns Number of summaries that were re-indexed.
+	 */
+	async regenAllEmbeddings(): Promise<number> {
+		// 1. Wipe the entire vector table by dropping and recreating it.
+		// vec0 virtual tables do not support bare DELETE FROM (no WHERE clause).
+		const raw = this.db.raw;
+		raw.exec(`DROP TABLE IF EXISTS link_summary_vec`);
+		raw.exec(`
+			CREATE VIRTUAL TABLE link_summary_vec USING vec0(
+				link_summary_id INTEGER PRIMARY KEY,
+				embedding float[768]
+			)
+		`);
+
+		// 2. Re-embed all completed summaries
+		const rows = this.db.all<{ id: number; summary: string }>(
+			`SELECT id, summary
+			 FROM link_summaries
+			 WHERE status = 'done'
+			   AND summary != ''`
+		);
+
+		if (rows.length === 0) return 0;
+
+		const texts = rows.map((r) => r.summary);
+		const embeddings = await this.embedBatch(texts);
+
+		for (let i = 0; i < rows.length; i++) {
+			this.upsertVector(BigInt(rows[i]!.id), embeddings[i]!);
+		}
+
+		return rows.length;
 	}
 
 	/**
@@ -127,7 +169,7 @@ export class LinkSummaryVectorService {
 		const embeddings = await this.embedBatch(texts);
 
 		for (let i = 0; i < rows.length; i++) {
-			this.upsertVector(rows[i]!.id, embeddings[i]!);
+			this.upsertVector(BigInt(rows[i]!.id), embeddings[i]!);
 		}
 
 		return rows.length;
@@ -267,19 +309,20 @@ export class LinkSummaryVectorService {
 	 * Uses DELETE + INSERT rather than ON CONFLICT because vec0 virtual
 	 * tables do not support the standard SQLite upsert syntax.
 	 */
-	private upsertVector(linkSummaryId: number, embedding: number[]): void {
+	private upsertVector(linkSummaryId: number | bigint, embedding: number[]): void {
 		const raw = this.db.raw;
+		const id = BigInt(linkSummaryId);
 
 		const del = raw.prepare(`DELETE FROM link_summary_vec WHERE link_summary_id = ?`);
 		const ins = raw.prepare(
 			`INSERT INTO link_summary_vec (link_summary_id, embedding) VALUES (?, ?)`
 		);
 
-		const upsert = raw.transaction((id: number, vec: number[]) => {
-			del.run(id);
-			ins.run(id, Buffer.from(new Float32Array(vec).buffer));
+		const upsert = raw.transaction((i: bigint, vec: number[]) => {
+			del.run(i);
+			ins.run(i, Buffer.from(new Float32Array(vec).buffer));
 		});
 
-		upsert(linkSummaryId, embedding);
+		upsert(id, embedding);
 	}
 }

@@ -75,6 +75,39 @@
 	let wiping = $state(false);
 	let wipeSuccess = $state<string | null>(null);
 
+	// Embedding regeneration
+	let regenEmbeddingsConfirm = $state(false);
+	let regenEmbeddingsLoading = $state(false);
+	let regenEmbeddingsResult = $state<{
+		chunksReindexed: number;
+		summariesReindexed: number;
+	} | null>(null);
+	let regenEmbeddingsError = $state<string | null>(null);
+
+	async function confirmRegenEmbeddings() {
+		regenEmbeddingsLoading = true;
+		regenEmbeddingsResult = null;
+		regenEmbeddingsError = null;
+		try {
+			const res = await fetch('/api/admin/db/embeddings', { method: 'POST' });
+			const data = await res.json();
+			if (res.ok) {
+				regenEmbeddingsResult = {
+					chunksReindexed: data.chunksReindexed,
+					summariesReindexed: data.summariesReindexed
+				};
+				regenEmbeddingsConfirm = false;
+				await loadTables();
+			} else {
+				regenEmbeddingsError = data.error ?? 'Failed to regenerate embeddings';
+			}
+		} catch (e) {
+			regenEmbeddingsError = e instanceof Error ? e.message : 'Failed to regenerate embeddings';
+		} finally {
+			regenEmbeddingsLoading = false;
+		}
+	}
+
 	async function loadTables() {
 		tablesLoading = true;
 		try {
@@ -508,55 +541,26 @@
 
 	<!-- ── DB TAB ──────────────────────────────────────────────────────────── -->
 	{#if activeTab === 'db'}
-		<div class="grid grid-cols-[220px_1fr] gap-4">
-			<!-- Table list sidebar -->
-			<div class="space-y-2">
-				<div class="flex items-center justify-between">
-					<span class="text-xs font-semibold tracking-wider uppercase opacity-50">Tables</span>
-					<button
-						type="button"
-						class="btn-icon size-6 hover:preset-tonal"
-						onclick={loadTables}
-						aria-label="Refresh tables"
-					>
-						<RefreshCwIcon class="size-3.5 {tablesLoading ? 'animate-spin' : ''}" />
-					</button>
-				</div>
-
-				{#if tablesLoading}
-					<div class="flex items-center gap-2 py-4 opacity-50">
-						<Loader2Icon class="size-4 animate-spin" />
-						<span class="text-sm">Loading…</span>
-					</div>
-				{:else}
-					<div class="space-y-0.5">
-						{#each tables as table (table.name)}
-							<button
-								type="button"
-								class="group flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors
-									{selectedTable === table.name ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
-								onclick={() => selectTable(table.name)}
-							>
-								<span class="truncate font-mono text-xs">{table.name}</span>
-								<span class="ml-1 shrink-0 text-[10px] opacity-50">{table.rowCount}</span>
-							</button>
-						{/each}
-					</div>
-				{/if}
-			</div>
-
-			<!-- Table data panel -->
-			<div class="min-w-0 space-y-3">
-				{#if wipeSuccess}
+		<div class="space-y-4">
+			<!-- Embeddings section -->
+			<div class="space-y-3 rounded-xl border border-surface-200-800 p-4">
+				{#if regenEmbeddingsResult}
 					<div
 						class="flex items-center gap-2 rounded-lg border border-success-500/30 bg-success-500/10 px-3 py-2 text-sm text-success-500"
 					>
 						<CheckIcon class="size-4 shrink-0" />
-						{wipeSuccess}
+						Re-indexed {regenEmbeddingsResult.chunksReindexed} document chunk{regenEmbeddingsResult.chunksReindexed !==
+						1
+							? 's'
+							: ''} and
+						{regenEmbeddingsResult.summariesReindexed} link summary{regenEmbeddingsResult.summariesReindexed !==
+						1
+							? 's'
+							: ''}.
 						<button
 							type="button"
 							class="ml-auto"
-							onclick={() => (wipeSuccess = null)}
+							onclick={() => (regenEmbeddingsResult = null)}
 							aria-label="Dismiss"
 						>
 							<XIcon class="size-3.5" />
@@ -564,167 +568,265 @@
 					</div>
 				{/if}
 
-				{#if !selectedTable}
+				{#if regenEmbeddingsError}
 					<div
-						class="flex h-48 items-center justify-center rounded-xl border border-dashed border-surface-300-700 text-sm opacity-40"
+						class="flex items-center gap-2 rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-500"
 					>
-						Select a table to inspect
+						<AlertTriangleIcon class="size-4 shrink-0" />
+						{regenEmbeddingsError}
+						<button
+							type="button"
+							class="ml-auto"
+							onclick={() => (regenEmbeddingsError = null)}
+							aria-label="Dismiss"
+						>
+							<XIcon class="size-3.5" />
+						</button>
 					</div>
-				{:else}
-					<!-- Table header -->
+				{/if}
+
+				<div class="flex items-center justify-between">
+					<div>
+						<h3 class="text-sm font-semibold">Vector Embeddings</h3>
+						<p class="mt-0.5 text-xs opacity-50">
+							Wipe and re-generate all embeddings for documents and link summaries. Use this when
+							switching embedding models or repairing a stale index.
+						</p>
+					</div>
+					<button
+						type="button"
+						class="btn shrink-0 preset-tonal-warning btn-sm"
+						onclick={() => {
+							regenEmbeddingsConfirm = true;
+							regenEmbeddingsResult = null;
+							regenEmbeddingsError = null;
+						}}
+					>
+						<RefreshCwIcon class="size-3.5" />
+						Regenerate All
+					</button>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-[220px_1fr] gap-4">
+				<!-- Table list sidebar -->
+				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<div>
-							<span class="font-mono font-semibold">{selectedTable}</span>
-							{#if tableData}
-								<span class="ml-2 text-xs opacity-50">{tableData.total} rows total</span>
-							{/if}
+						<span class="text-xs font-semibold tracking-wider uppercase opacity-50">Tables</span>
+						<button
+							type="button"
+							class="btn-icon size-6 hover:preset-tonal"
+							onclick={loadTables}
+							aria-label="Refresh tables"
+						>
+							<RefreshCwIcon class="size-3.5 {tablesLoading ? 'animate-spin' : ''}" />
+						</button>
+					</div>
+
+					{#if tablesLoading}
+						<div class="flex items-center gap-2 py-4 opacity-50">
+							<Loader2Icon class="size-4 animate-spin" />
+							<span class="text-sm">Loading…</span>
 						</div>
-						<div class="flex items-center gap-2">
-							<button type="button" class="btn preset-tonal btn-sm" onclick={loadTableData}>
-								<RefreshCwIcon class="size-3.5 {tableLoading ? 'animate-spin' : ''}" />
-								Refresh
-							</button>
+					{:else}
+						<div class="space-y-0.5">
+							{#each tables as table (table.name)}
+								<button
+									type="button"
+									class="group flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors
+									{selectedTable === table.name ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
+									onclick={() => selectTable(table.name)}
+								>
+									<span class="truncate font-mono text-xs">{table.name}</span>
+									<span class="ml-1 shrink-0 text-[10px] opacity-50">{table.rowCount}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
+				<!-- Table data panel -->
+				<div class="min-w-0 space-y-3">
+					{#if wipeSuccess}
+						<div
+							class="flex items-center gap-2 rounded-lg border border-success-500/30 bg-success-500/10 px-3 py-2 text-sm text-success-500"
+						>
+							<CheckIcon class="size-4 shrink-0" />
+							{wipeSuccess}
 							<button
 								type="button"
-								class="btn preset-filled-error-500 btn-sm"
-								onclick={() => (wipeTarget = selectedTable)}
+								class="ml-auto"
+								onclick={() => (wipeSuccess = null)}
+								aria-label="Dismiss"
 							>
-								<TrashIcon class="size-3.5" />
-								Wipe
+								<XIcon class="size-3.5" />
 							</button>
 						</div>
-					</div>
+					{/if}
 
-					{#if tableLoading}
-						<div class="flex items-center gap-2 py-8 opacity-50">
-							<Loader2Icon class="size-4 animate-spin" />
-							<span class="text-sm">Loading rows…</span>
-						</div>
-					{:else if tableError}
+					{#if !selectedTable}
 						<div
-							class="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-500"
+							class="flex h-48 items-center justify-center rounded-xl border border-dashed border-surface-300-700 text-sm opacity-40"
 						>
-							{tableError}
+							Select a table to inspect
 						</div>
-					{:else if tableData}
-						<!-- Table grid -->
-						<div class="overflow-x-auto rounded-xl border border-surface-200-800">
-							<table class="w-full text-left text-xs">
-								<thead class="border-b border-surface-200-800 bg-surface-50-950">
-									<tr>
-										{#each tableData.columns as col (col.name)}
-											<th class="px-3 py-2 font-semibold whitespace-nowrap opacity-70">
-												{col.name}
-												<span class="ml-1 font-normal opacity-40">{col.type}</span>
-											</th>
-										{/each}
-									</tr>
-								</thead>
-								<tbody>
-									{#each tableData.rows as row, rowIdx (rowIdx)}
-										<tr class="border-b border-surface-100-900 hover:bg-surface-50-950">
+					{:else}
+						<!-- Table header -->
+						<div class="flex items-center justify-between">
+							<div>
+								<span class="font-mono font-semibold">{selectedTable}</span>
+								{#if tableData}
+									<span class="ml-2 text-xs opacity-50">{tableData.total} rows total</span>
+								{/if}
+							</div>
+							<div class="flex items-center gap-2">
+								<button type="button" class="btn preset-tonal btn-sm" onclick={loadTableData}>
+									<RefreshCwIcon class="size-3.5 {tableLoading ? 'animate-spin' : ''}" />
+									Refresh
+								</button>
+								<button
+									type="button"
+									class="btn preset-filled-error-500 btn-sm"
+									onclick={() => (wipeTarget = selectedTable)}
+								>
+									<TrashIcon class="size-3.5" />
+									Wipe
+								</button>
+							</div>
+						</div>
+
+						{#if tableLoading}
+							<div class="flex items-center gap-2 py-8 opacity-50">
+								<Loader2Icon class="size-4 animate-spin" />
+								<span class="text-sm">Loading rows…</span>
+							</div>
+						{:else if tableError}
+							<div
+								class="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-500"
+							>
+								{tableError}
+							</div>
+						{:else if tableData}
+							<!-- Table grid -->
+							<div class="overflow-x-auto rounded-xl border border-surface-200-800">
+								<table class="w-full text-left text-xs">
+									<thead class="border-b border-surface-200-800 bg-surface-50-950">
+										<tr>
 											{#each tableData.columns as col (col.name)}
-												{@const val = row[col.name]}
-												{@const isEditing =
-													editingCell?.rowIdx === rowIdx && editingCell?.col === col.name}
-												<td class="max-w-50 px-3 py-1.5 align-top">
-													{#if isEditing}
-														<div class="flex items-center gap-1">
-															<input
-																class="input-sm input w-full font-mono text-xs"
-																bind:value={editValue}
-																onkeydown={(e) => {
-																	if (e.key === 'Enter') saveEdit(row);
-																	if (e.key === 'Escape') cancelEdit();
-																}}
-																use:focusAction
-															/>
-															<button
-																type="button"
-																class="btn-icon size-5 preset-filled-success-500"
-																onclick={() => saveEdit(row)}
-																aria-label="Save"
-															>
-																{#if savingCell}
-																	<Loader2Icon class="size-3 animate-spin" />
-																{:else}
-																	<CheckIcon class="size-3" />
-																{/if}
-															</button>
-															<button
-																type="button"
-																class="btn-icon size-5 preset-tonal"
-																onclick={cancelEdit}
-																aria-label="Cancel"
-															>
-																<XIcon class="size-3" />
-															</button>
-														</div>
-													{:else}
-														<button
-															type="button"
-															class="group/cell w-full text-left"
-															ondblclick={() => startEdit(rowIdx, col.name, val)}
-															title="Double-click to edit"
-														>
-															{#if val == null}
-																<span class="italic opacity-30">NULL</span>
-															{:else if isLongValue(val)}
-																<span class="line-clamp-2 font-mono opacity-80">
-																	{formatCellValue(val)}
-																</span>
-															{:else}
-																<span class="font-mono opacity-80">{formatCellValue(val)}</span>
-															{/if}
-														</button>
-													{/if}
-												</td>
+												<th class="px-3 py-2 font-semibold whitespace-nowrap opacity-70">
+													{col.name}
+													<span class="ml-1 font-normal opacity-40">{col.type}</span>
+												</th>
 											{/each}
 										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-
-						<!-- Pagination -->
-						{#if tableData.total > TABLE_PAGE_SIZE}
-							<div class="flex items-center justify-between text-xs opacity-60">
-								<span>
-									Showing {tablePage * TABLE_PAGE_SIZE + 1}–{Math.min(
-										(tablePage + 1) * TABLE_PAGE_SIZE,
-										tableData.total
-									)} of {tableData.total}
-								</span>
-								<div class="flex gap-1">
-									<button
-										type="button"
-										class="btn-icon size-7 hover:preset-tonal disabled:opacity-30"
-										disabled={tablePage === 0}
-										onclick={() => {
-											tablePage--;
-											loadTableData();
-										}}
-									>
-										<ChevronLeftIcon class="size-4" />
-									</button>
-									<button
-										type="button"
-										class="btn-icon size-7 hover:preset-tonal disabled:opacity-30"
-										disabled={(tablePage + 1) * TABLE_PAGE_SIZE >= tableData.total}
-										onclick={() => {
-											tablePage++;
-											loadTableData();
-										}}
-									>
-										<ChevronRightIcon class="size-4" />
-									</button>
-								</div>
+									</thead>
+									<tbody>
+										{#each tableData.rows as row, rowIdx (rowIdx)}
+											<tr class="border-b border-surface-100-900 hover:bg-surface-50-950">
+												{#each tableData.columns as col (col.name)}
+													{@const val = row[col.name]}
+													{@const isEditing =
+														editingCell?.rowIdx === rowIdx && editingCell?.col === col.name}
+													<td class="max-w-50 px-3 py-1.5 align-top">
+														{#if isEditing}
+															<div class="flex items-center gap-1">
+																<input
+																	class="input-sm input w-full font-mono text-xs"
+																	bind:value={editValue}
+																	onkeydown={(e) => {
+																		if (e.key === 'Enter') saveEdit(row);
+																		if (e.key === 'Escape') cancelEdit();
+																	}}
+																	use:focusAction
+																/>
+																<button
+																	type="button"
+																	class="btn-icon size-5 preset-filled-success-500"
+																	onclick={() => saveEdit(row)}
+																	aria-label="Save"
+																>
+																	{#if savingCell}
+																		<Loader2Icon class="size-3 animate-spin" />
+																	{:else}
+																		<CheckIcon class="size-3" />
+																	{/if}
+																</button>
+																<button
+																	type="button"
+																	class="btn-icon size-5 preset-tonal"
+																	onclick={cancelEdit}
+																	aria-label="Cancel"
+																>
+																	<XIcon class="size-3" />
+																</button>
+															</div>
+														{:else}
+															<button
+																type="button"
+																class="group/cell w-full text-left"
+																ondblclick={() => startEdit(rowIdx, col.name, val)}
+																title="Double-click to edit"
+															>
+																{#if val == null}
+																	<span class="italic opacity-30">NULL</span>
+																{:else if isLongValue(val)}
+																	<span class="line-clamp-2 font-mono opacity-80">
+																		{formatCellValue(val)}
+																	</span>
+																{:else}
+																	<span class="font-mono opacity-80">{formatCellValue(val)}</span>
+																{/if}
+															</button>
+														{/if}
+													</td>
+												{/each}
+											</tr>
+										{/each}
+									</tbody>
+								</table>
 							</div>
+
+							<!-- Pagination -->
+							{#if tableData.total > TABLE_PAGE_SIZE}
+								<div class="flex items-center justify-between text-xs opacity-60">
+									<span>
+										Showing {tablePage * TABLE_PAGE_SIZE + 1}–{Math.min(
+											(tablePage + 1) * TABLE_PAGE_SIZE,
+											tableData.total
+										)} of {tableData.total}
+									</span>
+									<div class="flex gap-1">
+										<button
+											type="button"
+											class="btn-icon size-7 hover:preset-tonal disabled:opacity-30"
+											disabled={tablePage === 0}
+											onclick={() => {
+												tablePage--;
+												loadTableData();
+											}}
+										>
+											<ChevronLeftIcon class="size-4" />
+										</button>
+										<button
+											type="button"
+											class="btn-icon size-7 hover:preset-tonal disabled:opacity-30"
+											disabled={(tablePage + 1) * TABLE_PAGE_SIZE >= tableData.total}
+											onclick={() => {
+												tablePage++;
+												loadTableData();
+											}}
+										>
+											<ChevronRightIcon class="size-4" />
+										</button>
+									</div>
+								</div>
+							{/if}
 						{/if}
 					{/if}
-				{/if}
+				</div>
 			</div>
 		</div>
+		<!-- end space-y-4 wrapper -->
 
 		<!-- Wipe confirmation modal -->
 		{#if wipeTarget}
@@ -754,6 +856,57 @@
 								<TrashIcon class="size-4" />
 							{/if}
 							Delete All Rows
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Regenerate embeddings confirmation modal -->
+		{#if regenEmbeddingsConfirm}
+			<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+				<div class="max-w-sm space-y-4 card border border-warning-500/40 bg-surface-50-950 p-6">
+					<div class="flex items-center gap-3 text-warning-500">
+						<AlertTriangleIcon class="size-6 shrink-0" />
+						<h2 class="font-bold">Regenerate all embeddings?</h2>
+					</div>
+					<p class="text-sm opacity-70">
+						This will <strong>wipe</strong> all existing vectors in
+						<code class="font-mono">document_chunks_vec</code> and
+						<code class="font-mono">link_summary_vec</code>, then re-embed every document chunk and
+						completed link summary from scratch. This may take a while depending on the number of
+						records and the speed of your embedding model.
+					</p>
+					{#if regenEmbeddingsError}
+						<div
+							class="flex items-center gap-2 rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-500"
+						>
+							<AlertTriangleIcon class="size-4 shrink-0" />
+							{regenEmbeddingsError}
+						</div>
+					{/if}
+					<div class="flex justify-end gap-2">
+						<button
+							type="button"
+							class="btn preset-tonal"
+							disabled={regenEmbeddingsLoading}
+							onclick={() => (regenEmbeddingsConfirm = false)}
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							class="btn preset-filled-warning-500"
+							disabled={regenEmbeddingsLoading}
+							onclick={confirmRegenEmbeddings}
+						>
+							{#if regenEmbeddingsLoading}
+								<Loader2Icon class="size-4 animate-spin" />
+								Regenerating…
+							{:else}
+								<RefreshCwIcon class="size-4" />
+								Regenerate
+							{/if}
 						</button>
 					</div>
 				</div>

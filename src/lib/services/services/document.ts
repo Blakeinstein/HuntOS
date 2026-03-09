@@ -205,6 +205,47 @@ export class DocumentService {
 		return result.changes > 0;
 	}
 
+	// ── Regenerate Embeddings ──────────────────────────────────────
+
+	/**
+	 * Wipe all existing chunk vectors from `document_chunks_vec` and
+	 * re-embed every chunk that is currently stored in `document_chunks`.
+	 *
+	 * Use this when the embedding model has changed or the vector table has
+	 * become stale/corrupt. Old vectors are deleted before new ones are
+	 * generated so the index is always consistent.
+	 *
+	 * @returns Number of chunks that were re-indexed.
+	 */
+	async regenAllEmbeddings(): Promise<number> {
+		// 1. Wipe the entire vector table by dropping and recreating it.
+		// vec0 virtual tables do not support bare DELETE FROM (no WHERE clause).
+		const raw = this.db.raw;
+		raw.exec(`DROP TABLE IF EXISTS document_chunks_vec`);
+		raw.exec(`
+			CREATE VIRTUAL TABLE document_chunks_vec USING vec0(
+				chunk_id INTEGER PRIMARY KEY,
+				embedding float[768]
+			)
+		`);
+
+		// 2. Fetch all chunks across all documents
+		const chunks = this.db.all<{ id: number; text: string }>(
+			`SELECT id, text FROM document_chunks ORDER BY document_id, chunk_index`
+		);
+
+		if (chunks.length === 0) return 0;
+
+		// 3. Embed in one batch and re-insert vectors
+		const embeddings = await this.embedTexts(chunks.map((c) => c.text));
+		this.upsertVectors(
+			chunks.map((c) => c.id),
+			embeddings
+		);
+
+		return chunks.length;
+	}
+
 	// ── Vector Search ──────────────────────────────────────────────
 
 	/**
@@ -342,14 +383,14 @@ export class DocumentService {
 	 * Insert embedding vectors into the sqlite-vec virtual table.
 	 * Each vector is associated with a chunk_id from document_chunks.
 	 */
-	private upsertVectors(chunkIds: number[], embeddings: number[][]): void {
+	private upsertVectors(chunkIds: (number | bigint)[], embeddings: number[][]): void {
 		const raw = this.db.raw;
 		const stmt = raw.prepare(`INSERT INTO document_chunks_vec (chunk_id, embedding) VALUES (?, ?)`);
 
-		const insertMany = raw.transaction((ids: number[], vecs: number[][]) => {
+		const insertMany = raw.transaction((ids: (number | bigint)[], vecs: number[][]) => {
 			for (let i = 0; i < ids.length; i++) {
 				const vec = new Float32Array(vecs[i]!);
-				stmt.run(ids[i], vec.buffer as ArrayBuffer);
+				stmt.run(BigInt(ids[i]!), Buffer.from(vec.buffer));
 			}
 		});
 
