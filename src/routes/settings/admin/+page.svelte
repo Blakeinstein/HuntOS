@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import LogTerminal from '$lib/components/LogTerminal.svelte';
 	import CronbakeEditor from '$lib/components/CronbakeEditor.svelte';
+	import ScreenshotGallery from '$lib/components/ScreenshotGallery.svelte';
 
 	function focusAction(node: HTMLElement) {
 		node.focus();
@@ -272,8 +273,21 @@
 		try {
 			if (bucket === 'screenshots') {
 				const res = await fetch('/api/admin/screenshots');
-				screenshotRuns = await res.json();
+				const runs: ScreenshotRun[] = await res.json();
 				bucketFiles = [];
+				// Eagerly load all run file listings in parallel so galleries render immediately
+				const withFiles = await Promise.all(
+					runs.map(async (run) => {
+						try {
+							const r = await fetch(`/api/admin/screenshots?run=${encodeURIComponent(run.run)}`);
+							const data = await r.json();
+							return { ...run, files: data.files ?? [], filesLoading: false };
+						} catch {
+							return { ...run, files: [], filesLoading: false };
+						}
+					})
+				);
+				screenshotRuns = withFiles;
 			} else {
 				const res = await fetch(`/api/admin/files?bucket=${bucket}`);
 				const data = await res.json();
@@ -883,218 +897,168 @@
 			</div>
 
 			{#if selectedBucket}
-				<div class="grid grid-cols-[280px_1fr] gap-4">
-					<!-- File list -->
-					<div class="space-y-2">
-						<div class="flex items-center justify-between">
-							<span class="text-xs font-semibold tracking-wider uppercase opacity-50">
-								{selectedBucket}
-							</span>
-							{#if selectedBucket === 'screenshots'}
-								<span class="text-xs opacity-40"
-									>{screenshotRuns.length} run{screenshotRuns.length === 1 ? '' : 's'}</span
-								>
-							{:else}
+				{#if selectedBucket === 'screenshots'}
+					<!-- ── Screenshot galleries ───────────────────────────────────────── -->
+					{#if bucketLoading}
+						<div class="flex items-center gap-2 py-12 opacity-50">
+							<Loader2Icon class="size-5 animate-spin" />
+							<span class="text-sm">Loading screenshots…</span>
+						</div>
+					{:else if screenshotRuns.length === 0}
+						<div
+							class="rounded-xl border border-dashed border-surface-300-700 py-16 text-center text-sm opacity-40"
+						>
+							No screenshots yet
+						</div>
+					{:else}
+						<div class="space-y-6">
+							{#each screenshotRuns as run (run.run)}
+								{@const galleryImages = (run.files ?? []).map((f) => ({
+									filename: f.name,
+									url: `/api/screenshots/file/${run.run}/${f.relPath}`
+								}))}
+								{#if galleryImages.length > 0}
+									<div class="rounded-xl border border-surface-200-800 bg-surface-50-950 p-5">
+										<ScreenshotGallery name={run.run} images={galleryImages} />
+									</div>
+								{/if}
+							{/each}
+						</div>
+					{/if}
+				{:else}
+					<!-- ── Non-screenshot buckets: split list + preview ───────────────── -->
+					<div class="grid grid-cols-[280px_1fr] gap-4">
+						<!-- File list -->
+						<div class="space-y-2">
+							<div class="flex items-center justify-between">
+								<span class="text-xs font-semibold tracking-wider uppercase opacity-50">
+									{selectedBucket}
+								</span>
 								<span class="text-xs opacity-40">{bucketFiles.length} files</span>
+							</div>
+
+							{#if bucketLoading}
+								<div class="flex items-center gap-2 py-4 opacity-50">
+									<Loader2Icon class="size-4 animate-spin" />
+									<span class="text-sm">Loading…</span>
+								</div>
+							{:else if bucketFiles.length === 0}
+								<div
+									class="rounded-xl border border-dashed border-surface-300-700 py-8 text-center text-sm opacity-40"
+								>
+									No files
+								</div>
+							{:else}
+								<div class="max-h-[calc(100vh-360px)] space-y-0.5 overflow-y-auto">
+									{#each bucketFiles as file (file.relPath)}
+										{@const FIcon = fileIcon(file.ext)}
+										<div
+											role="button"
+											tabindex="0"
+											class="group flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors
+														{previewFile?.relPath === file.relPath ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
+											onclick={() => previewFileEntry(file)}
+											onkeydown={(e) => e.key === 'Enter' && previewFileEntry(file)}
+										>
+											<FIcon class="size-4 shrink-0 opacity-60" />
+											<div class="min-w-0 flex-1">
+												<div class="truncate font-mono text-xs">{file.name}</div>
+												<div class="text-[10px] opacity-40">{file.sizeHuman}</div>
+											</div>
+											<button
+												type="button"
+												class="btn-icon size-5 opacity-0 transition-opacity group-hover:opacity-60 hover:text-error-500"
+												onclick={(e) => {
+													e.stopPropagation();
+													deleteFileTarget = file;
+												}}
+												aria-label="Delete file"
+											>
+												<TrashIcon class="size-3" />
+											</button>
+										</div>
+									{/each}
+								</div>
 							{/if}
 						</div>
 
-						{#if bucketLoading}
-							<div class="flex items-center gap-2 py-4 opacity-50">
-								<Loader2Icon class="size-4 animate-spin" />
-								<span class="text-sm">Loading…</span>
-							</div>
-						{:else if selectedBucket === 'screenshots' ? screenshotRuns.length === 0 : bucketFiles.length === 0}
-							<div
-								class="rounded-xl border border-dashed border-surface-300-700 py-8 text-center text-sm opacity-40"
-							>
-								No files
-							</div>
-						{:else if selectedBucket === 'screenshots'}
-							<!-- Run-grouped view for screenshots -->
-							<div class="max-h-[calc(100vh-360px)] space-y-1 overflow-y-auto">
-								{#each screenshotRuns as run (run.run)}
-									{@const isExpanded = expandedRuns.has(run.run)}
-									<div class="overflow-hidden rounded-lg border border-surface-200-800">
-										<!-- Run header -->
-										<button
-											type="button"
-											class="flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-surface-200-800"
-											onclick={() => toggleRun(run)}
-										>
-											<ChevronDownIcon
-												class="size-3.5 shrink-0 opacity-50 transition-transform {isExpanded
-													? ''
-													: '-rotate-90'}"
-											/>
-											<FolderIcon class="size-4 shrink-0 text-primary-500 opacity-60" />
-											<div class="min-w-0 flex-1">
-												<div class="truncate font-mono text-xs font-medium">{run.run}</div>
-												<div class="text-[10px] opacity-40">
-													{run.fileCount} file{run.fileCount === 1 ? '' : 's'}
-													{#if run.latestAt}
-														· {new Date(run.latestAt).toLocaleDateString()}
-													{/if}
-												</div>
-											</div>
-										</button>
-
-										<!-- Run files -->
-										{#if isExpanded}
-											{#if run.filesLoading}
-												<div class="flex items-center gap-2 px-4 py-2 opacity-50">
-													<Loader2Icon class="size-3 animate-spin" />
-													<span class="text-xs">Loading…</span>
-												</div>
-											{:else if run.files && run.files.length > 0}
-												<div class="border-t border-surface-200-800 bg-surface-50-950">
-													{#each run.files as file (file.relPath)}
-														{@const entry = screenshotFileToEntry(run.run, file)}
-														<div
-															role="button"
-															tabindex="0"
-															class="group flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 pl-7 text-left transition-colors
-																{previewFile?.relPath === entry.relPath ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
-															onclick={() => previewFileEntry(entry)}
-															onkeydown={(e) => e.key === 'Enter' && previewFileEntry(entry)}
-														>
-															<ImageIcon class="size-3.5 shrink-0 opacity-50" />
-															<div class="min-w-0 flex-1">
-																<div class="truncate font-mono text-xs">{file.name}</div>
-																<div class="text-[10px] opacity-40">{humanSize(file.size)}</div>
-															</div>
-															<button
-																type="button"
-																class="btn-icon size-5 opacity-0 transition-opacity group-hover:opacity-60 hover:text-error-500"
-																onclick={(e) => {
-																	e.stopPropagation();
-																	deleteFileTarget = entry;
-																}}
-																aria-label="Delete file"
-															>
-																<TrashIcon class="size-3" />
-															</button>
-														</div>
-													{/each}
-												</div>
-											{:else}
-												<div class="px-4 py-2 text-xs opacity-40">No files</div>
-											{/if}
-										{/if}
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<div class="max-h-[calc(100vh-360px)] space-y-0.5 overflow-y-auto">
-								{#each bucketFiles as file (file.relPath)}
-									{@const FIcon = fileIcon(file.ext)}
-									<!-- Use div+role so we can nest the delete button without invalid HTML -->
+						<!-- Preview panel -->
+						<div class="min-w-0 rounded-xl border border-surface-200-800 bg-surface-50-950">
+							{#if !previewFile}
+								<div class="flex h-48 items-center justify-center text-sm opacity-40">
+									Select a file to preview
+								</div>
+							{:else}
+								<div class="flex h-full flex-col">
+									<!-- Preview header -->
 									<div
-										role="button"
-										tabindex="0"
-										class="group flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors
-												{previewFile?.relPath === file.relPath ? 'preset-tonal-primary' : 'hover:bg-surface-200-800'}"
-										onclick={() => previewFileEntry(file)}
-										onkeydown={(e) => e.key === 'Enter' && previewFileEntry(file)}
+										class="flex items-center justify-between border-b border-surface-200-800 px-4 py-3"
 									>
-										<FIcon class="size-4 shrink-0 opacity-60" />
-										<div class="min-w-0 flex-1">
-											<div class="truncate font-mono text-xs">{file.name}</div>
-											<div class="text-[10px] opacity-40">{file.sizeHuman}</div>
+										<div class="min-w-0">
+											<div class="truncate font-mono text-sm font-semibold">{previewFile.name}</div>
+											<div class="text-xs opacity-50">
+												{previewFile.sizeHuman} · {previewFile.mime}
+											</div>
 										</div>
-										<button
-											type="button"
-											class="btn-icon size-5 opacity-0 transition-opacity group-hover:opacity-60 hover:text-error-500"
-											onclick={(e) => {
-												e.stopPropagation();
-												deleteFileTarget = file;
-											}}
-											aria-label="Delete file"
-										>
-											<TrashIcon class="size-3" />
-										</button>
-									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-
-					<!-- Preview panel -->
-					<div class="min-w-0 rounded-xl border border-surface-200-800 bg-surface-50-950">
-						{#if !previewFile}
-							<div class="flex h-48 items-center justify-center text-sm opacity-40">
-								Select a file to preview
-							</div>
-						{:else}
-							<div class="flex h-full flex-col">
-								<!-- Preview header -->
-								<div
-									class="flex items-center justify-between border-b border-surface-200-800 px-4 py-3"
-								>
-									<div class="min-w-0">
-										<div class="truncate font-mono text-sm font-semibold">{previewFile.name}</div>
-										<div class="text-xs opacity-50">
-											{previewFile.sizeHuman} · {previewFile.mime}
-										</div>
-									</div>
-									<div class="flex items-center gap-2">
-										{#if previewUrl}
+										<div class="flex items-center gap-2">
+											{#if previewUrl}
+												<button
+													type="button"
+													class="btn preset-tonal btn-sm"
+													onclick={() => {
+														if (!previewUrl || !previewFile) return;
+														const a = document.createElement('a');
+														a.href = previewUrl;
+														a.download = previewFile.name;
+														a.click();
+													}}
+												>
+													<DownloadIcon class="size-3.5" />
+													Download
+												</button>
+											{/if}
 											<button
 												type="button"
-												class="btn preset-tonal btn-sm"
+												class="btn-icon size-7 hover:text-error-500"
 												onclick={() => {
-													if (!previewUrl || !previewFile) return;
-													const a = document.createElement('a');
-													a.href = previewUrl;
-													a.download = previewFile.name;
-													a.click();
+													deleteFileTarget = previewFile;
 												}}
+												aria-label="Delete"
 											>
-												<DownloadIcon class="size-3.5" />
-												Download
+												<TrashIcon class="size-4" />
 											</button>
+										</div>
+									</div>
+
+									<!-- Preview content -->
+									<div class="flex-1 overflow-auto p-4">
+										{#if previewFile.mime.startsWith('image/')}
+											<img
+												src={previewUrl ?? ''}
+												alt={previewFile.name}
+												class="max-h-[60vh] max-w-full rounded object-contain"
+											/>
+										{:else if previewFile.mime === 'application/pdf'}
+											<iframe
+												src={previewUrl ?? ''}
+												title={previewFile.name}
+												class="h-[60vh] w-full rounded border-0"
+											></iframe>
+										{:else if previewText !== null}
+											<pre
+												class="font-mono text-xs leading-relaxed break-all whitespace-pre-wrap opacity-80">{previewText}</pre>
+										{:else}
+											<div class="flex h-32 items-center justify-center text-sm opacity-40">
+												<EyeIcon class="mr-2 size-4" />
+												Preview not available — use Download
+											</div>
 										{/if}
-										<button
-											type="button"
-											class="btn-icon size-7 hover:text-error-500"
-											onclick={() => {
-												deleteFileTarget = previewFile;
-											}}
-											aria-label="Delete"
-										>
-											<TrashIcon class="size-4" />
-										</button>
 									</div>
 								</div>
-
-								<!-- Preview content -->
-								<div class="flex-1 overflow-auto p-4">
-									{#if previewFile.mime.startsWith('image/')}
-										<img
-											src={previewUrl ?? ''}
-											alt={previewFile.name}
-											class="max-h-[60vh] max-w-full rounded object-contain"
-										/>
-									{:else if previewFile.mime === 'application/pdf'}
-										<iframe
-											src={previewUrl ?? ''}
-											title={previewFile.name}
-											class="h-[60vh] w-full rounded border-0"
-										></iframe>
-									{:else if previewText !== null}
-										<pre
-											class="font-mono text-xs leading-relaxed break-all whitespace-pre-wrap opacity-80">{previewText}</pre>
-									{:else}
-										<div class="flex h-32 items-center justify-center text-sm opacity-40">
-											<EyeIcon class="mr-2 size-4" />
-											Preview not available — use Download
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/if}
+							{/if}
+						</div>
 					</div>
-				</div>
+				{/if}
 			{/if}
 		</div>
 

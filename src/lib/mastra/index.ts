@@ -42,38 +42,12 @@ const linkedInAgent = createLinkedInAgent();
 const greenhouseAgent = createGreenhouseAgent();
 const genericAgent = createGenericAgent();
 
-// Shared tool-call audit callback — routes every browser tool invocation
-// to the audit_logs table so individual tool calls are visible in the UI.
+// Shared tool-call callback — writes every browser tool invocation to the
+// active pipeline step logs in real-time. Tool calls are intentionally NOT
+// written to the audit_logs table; they should only appear inside the
+// application pipeline log view.
 const toolAuditCallback = {
 	onToolCall: (evt: import('./tools/with-logging').ToolCallEvent) => {
-		// 1. Write to the audit_logs table (existing behaviour)
-		services.auditLogService.create({
-			category: 'browser',
-			agent_id: 'job-application-agent',
-			status: evt.success ? 'success' : 'error',
-			title: `Tool: ${evt.toolId}`,
-			detail: evt.success
-				? `${evt.toolId}(${Object.entries(evt.input)
-						.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-						.join(
-							', '
-						)}) → ${typeof evt.output === 'object' ? JSON.stringify(evt.output) : String(evt.output)}`.slice(
-						0,
-						500
-					)
-				: `${evt.toolId} failed: ${evt.error}`,
-			duration_ms: evt.durationMs,
-			meta: {
-				input: evt.input,
-				...(evt.output ? { output: evt.output } : {}),
-				...(evt.error ? { error: evt.error } : {})
-			}
-		});
-
-		// 2. Write to pipeline step logs in real-time (if a pipeline is active).
-		//    This makes tool responses show up immediately in the pipeline UI
-		//    instead of waiting for the full iteration to complete.
-		//    Also captures proactive screenshots after key interactions for audit.
 		logToolCallToPipeline(evt.toolId, evt.input, evt.output, evt.success, evt.durationMs).catch(
 			(err) => {
 				logger.warn('[mastra] Pipeline tool-call log failed', { error: String(err) });

@@ -605,7 +605,28 @@ Before clicking the final submit button:
 
 ### Step 7: Return Structured Results
 
-After completing (or failing) the application attempt, return a JSON object with this exact structure:
+After completing (or failing) the application attempt, return a JSON object with this exact structure.
+
+**Allowed `field_type` values** (use the closest match; use `"other"` if none fit):
+
+| Value | When to use |
+|-------|-------------|
+| `"text"` | Plain text input (`<input type="text">`) |
+| `"email"` | Email input |
+| `"tel"` | Phone number input |
+| `"url"` | URL input |
+| `"textarea"` | Multi-line text area |
+| `"select"` | Native `<select>` dropdown |
+| `"combobox"` | Autocomplete / typeahead / custom dropdown (`role="combobox"`, location pickers, etc.) |
+| `"checkbox"` | Checkbox input |
+| `"radio"` | Radio button |
+| `"file"` | File upload input |
+| `"date"` | Date picker input |
+| `"number"` | Numeric input |
+| `"password"` | Password input |
+| `"hidden"` | Hidden input |
+| `"other"` | Any input type not covered above |
+
 
 ```json
 {

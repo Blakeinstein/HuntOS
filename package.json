@@ -43,6 +43,7 @@
 		"pdf-parse-new": "^2.0.0",
 		"search-ai-core": "^0.0.1",
 		"sqlite-vec": "^0.1.7-alpha.2",
+		"svelte-lightbox": "^1.1.7",
 		"untruncate-json": "^0.0.1",
 		"zod": "^4"
 	},
