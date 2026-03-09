@@ -25,6 +25,7 @@
 	import TemplateEditorModal from '$lib/components/TemplateEditorModal.svelte';
 	import CartaEditor from '$lib/components/CartaEditor.svelte';
 	import ResumeHistory from '$lib/components/ResumeHistory.svelte';
+	import { resumeFileSlug } from '$lib/utils';
 
 	const DEFAULT_BOOTSTRAP_MESSAGE =
 		'Please generate a tailored, ATS-friendly resume for the job description provided. ' +
@@ -55,6 +56,25 @@
 
 	/** The resume format setting from the server */
 	const resumeFormat = $derived(data.resumeFormat ?? 'markdown');
+
+	// ── Prefill from history ─────────────────────────────────────
+
+	function handlePrefill(params: {
+		name: string;
+		jobDescription: string;
+		bootstrapMessage: string | null;
+		templateId: number | null;
+	}) {
+		resumeName = params.name;
+		jobDescription = params.jobDescription;
+		if (params.bootstrapMessage) {
+			bootstrapMessage = params.bootstrapMessage;
+		}
+		if (params.templateId != null) {
+			selectedTemplateId = params.templateId;
+		}
+		activeTab = 'generate';
+	}
 
 	// ── Templates tab state ──────────────────────────────────────
 	let activeTab = $state('generate');
@@ -176,7 +196,7 @@
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = 'resume.pdf';
+			a.download = `${resumeFileSlug(resumeName)}-resume.pdf`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -199,7 +219,7 @@
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = 'resume.md';
+			a.download = `${resumeFileSlug(resumeName)}-resume.md`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -605,7 +625,7 @@ We are looking for a Senior Software Engineer with 5+ years of TypeScript, React
 		<!-- ═══ History Tab ═══ -->
 		<Tabs.Content value="history">
 			<div class="mt-4">
-				<ResumeHistory {history} />
+				<ResumeHistory {history} onPrefill={handlePrefill} />
 			</div>
 		</Tabs.Content>
 

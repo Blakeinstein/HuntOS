@@ -9,3 +9,4 @@
  */
 
 export * from './boolean.js';
+export * from './resumeSlug.js';

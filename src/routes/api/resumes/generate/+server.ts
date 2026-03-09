@@ -87,6 +87,7 @@ async function handleMarkdownGeneration(
 	const historyEntry = services.resumeHistoryService.create({
 		name,
 		jobDescription,
+		bootstrapMessage: bootstrapMessage ?? null,
 		templateId: templateId ? Number(templateId) : null,
 		templateName: result.templateName,
 		model: 'resume-agent',
@@ -157,6 +158,7 @@ async function handleTypstGeneration(
 	const historyEntry = services.resumeHistoryService.create({
 		name,
 		jobDescription,
+		bootstrapMessage: bootstrapMessage ?? null,
 		templateId: null,
 		templateName: result.templateName,
 		model: 'resume-agent',

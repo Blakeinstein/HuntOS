@@ -22,14 +22,17 @@
 		FileIcon,
 		RocketIcon,
 		ExternalLinkIcon,
-		ScrollTextIcon
+		ScrollTextIcon,
+		CopyIcon
 	} from '@lucide/svelte';
 	import CartaEditor from '$lib/components/CartaEditor.svelte';
+	import { resumeFileSlug } from '$lib/utils';
 
 	interface HistoryEntry {
 		id: number;
 		name: string;
 		job_description: string;
+		bootstrap_message: string | null;
 		template_id: number | null;
 		template_name: string;
 		model: string;
@@ -50,11 +53,19 @@
 		offset: number;
 	}
 
-	interface Props {
-		history: HistoryPage;
+	interface PrefillParams {
+		name: string;
+		jobDescription: string;
+		bootstrapMessage: string | null;
+		templateId: number | null;
 	}
 
-	let { history }: Props = $props();
+	interface Props {
+		history: HistoryPage;
+		onPrefill?: (params: PrefillParams) => void;
+	}
+
+	let { history, onPrefill }: Props = $props();
 
 	// ── Helpers ──────────────────────────────────────────────────
 
@@ -157,11 +168,11 @@
 
 			const blob = await res.blob();
 			const ext = format === 'pdf' ? 'pdf' : 'md';
-			const safeName = entry.name.replace(/[^\w\s.()-]/g, '').replace(/\s+/g, '_') || 'resume';
+			const slug = resumeFileSlug(entry.name);
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `${safeName}.${ext}`;
+			a.download = `${slug}-resume.${ext}`;
 			document.body.appendChild(a);
 			a.click();
 			a.remove();
@@ -390,6 +401,24 @@
 										>
 											<ScrollTextIcon class="size-3.5" />
 										</a>
+									{/if}
+
+									<!-- Prefill Quick Generate -->
+									{#if onPrefill}
+										<button
+											type="button"
+											class="btn-icon btn-icon-sm hover:preset-tonal-primary"
+											title="Prefill Quick Generate with this entry"
+											onclick={() =>
+												onPrefill({
+													name: entry.name,
+													jobDescription: entry.job_description,
+													bootstrapMessage: entry.bootstrap_message,
+													templateId: entry.template_id
+												})}
+										>
+											<CopyIcon class="size-3.5" />
+										</button>
 									{/if}
 
 									<!-- Preview -->

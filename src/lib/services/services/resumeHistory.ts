@@ -16,6 +16,8 @@ export interface ResumeHistoryEntry {
 	name: string;
 	/** The job description that was used to generate this resume */
 	job_description: string;
+	/** The bootstrap/human-turn message used to trigger generation */
+	bootstrap_message: string | null;
 	/** Template ID used for generation */
 	template_id: number | null;
 	/** Template name at time of generation */
@@ -46,6 +48,7 @@ interface ResumeHistoryRow {
 	id: number;
 	name: string;
 	job_description: string;
+	bootstrap_message: string | null;
 	template_id: number | null;
 	template_name: string;
 	model: string;
@@ -63,6 +66,7 @@ interface ResumeHistoryRow {
 export interface CreateResumeHistoryOptions {
 	name: string;
 	jobDescription: string;
+	bootstrapMessage?: string | null;
 	templateId?: number | null;
 	templateName: string;
 	model: string;
@@ -125,6 +129,7 @@ export class ResumeHistoryService {
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				name TEXT NOT NULL,
 				job_description TEXT NOT NULL,
+				bootstrap_message TEXT,
 				template_id INTEGER,
 				template_name TEXT NOT NULL,
 				model TEXT NOT NULL DEFAULT '',
@@ -149,6 +154,13 @@ export class ResumeHistoryService {
 		// Migration: add application_id column if missing (existing databases)
 		try {
 			this.db.raw.exec(`ALTER TABLE resume_history ADD COLUMN application_id INTEGER`);
+		} catch {
+			// Column already exists — ignore
+		}
+
+		// Migration: add bootstrap_message column if missing (existing databases)
+		try {
+			this.db.raw.exec(`ALTER TABLE resume_history ADD COLUMN bootstrap_message TEXT`);
 		} catch {
 			// Column already exists — ignore
 		}
@@ -182,11 +194,12 @@ export class ResumeHistoryService {
 
 		const result = this.db.run(
 			`INSERT INTO resume_history
-				(name, job_description, template_id, template_name, model, data, file_path, pdf_path, duration_ms, application_id, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				(name, job_description, bootstrap_message, template_id, template_name, model, data, file_path, pdf_path, duration_ms, application_id, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				opts.name,
 				opts.jobDescription,
+				opts.bootstrapMessage ?? null,
 				opts.templateId ?? null,
 				opts.templateName,
 				opts.model,
@@ -555,6 +568,7 @@ export class ResumeHistoryService {
 			id: row.id,
 			name: row.name,
 			job_description: row.job_description,
+			bootstrap_message: row.bootstrap_message ?? null,
 			template_id: row.template_id,
 			template_name: row.template_name,
 			model: row.model,

@@ -65,6 +65,8 @@ export async function POST({ request }) {
 /**
  * PATCH /api/profiles/links/summarize
  * Update the summary text for an existing link summary (manual edit).
+ * Re-embeds the updated text into the vector store so semantic search
+ * reflects the corrected content immediately.
  *
  * Body: { title: string; summary: string }
  */
@@ -88,7 +90,23 @@ export async function PATCH({ request }) {
 		services.linkSummaryService.markDone(title, summary);
 		const updated = services.linkSummaryService.getByTitle(title);
 
-		return json({ summary: updated });
+		// Re-embed the updated summary so the vector store stays in sync.
+		// Mirrors the non-fatal pattern used in LinkSummaryQueue.runNext().
+		if (updated && summary.trim().length > 0) {
+			try {
+				await services.linkSummaryVectorService.upsertEmbedding(updated.id, summary);
+			} catch (embedErr) {
+				const message = embedErr instanceof Error ? embedErr.message : String(embedErr);
+				console.warn(
+					`[PATCH /api/profiles/links/summarize] Failed to re-embed summary for "${title}": ${message}`
+				);
+				// Non-fatal — the updated text is already persisted; return a flag
+				// so the caller knows the vector may be temporarily stale.
+				return json({ summary: updated, embeddingStale: true });
+			}
+		}
+
+		return json({ summary: updated, embeddingStale: false });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to update summary';
 		return json({ error: message }, { status: 500 });
