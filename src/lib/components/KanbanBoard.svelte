@@ -5,6 +5,7 @@
 	import { NON_REMOVABLE_SWIMLANES } from '$lib/services/types';
 	import KanbanCard from './KanbanCard.svelte';
 	import AddSwimlaneDialog from './AddSwimlaneDialog.svelte';
+	import AddJobDialog from './AddJobDialog.svelte';
 
 	interface ApplicationWithPipeline extends ApplicationWithSwimlane {
 		active_pipeline_run: PipelineRun | null;
@@ -56,6 +57,7 @@
 	let dropSide = $state<'left' | 'right'>('right');
 
 	let showAddSwimlane = $state(false);
+	let showAddJob = $state(false);
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -271,6 +273,27 @@
 		showAddSwimlane = false;
 		await invalidate('db:swimlanes');
 	}
+
+	async function handleAddJob(data: {
+		title: string;
+		company: string;
+		job_description_url?: string;
+		job_description?: string;
+	}) {
+		const response = await fetch('/api/applications', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(data)
+		});
+
+		if (!response.ok) {
+			const body = await response.json();
+			throw new Error(body.error ?? 'Failed to create application.');
+		}
+
+		showAddJob = false;
+		await invalidate('db:applications');
+	}
 </script>
 
 <div class="flex h-full flex-col gap-4">
@@ -282,14 +305,20 @@
 				Drag applications between swimlanes. Drag column headers to reorder.
 			</p>
 		</div>
-		<button
-			type="button"
-			class="btn gap-2 preset-filled-primary-500"
-			onclick={() => (showAddSwimlane = true)}
-		>
-			<PlusIcon class="size-4" />
-			<span>Add Swimlane</span>
-		</button>
+		<div class="flex items-center gap-2">
+			<button type="button" class="btn gap-2 preset-tonal" onclick={() => (showAddSwimlane = true)}>
+				<PlusIcon class="size-4" />
+				<span>Add Swimlane</span>
+			</button>
+			<button
+				type="button"
+				class="btn gap-2 preset-filled-primary-500"
+				onclick={() => (showAddJob = true)}
+			>
+				<PlusIcon class="size-4" />
+				<span>Add Job</span>
+			</button>
+		</div>
 	</div>
 
 	<!-- Kanban columns -->
@@ -441,4 +470,8 @@
 
 {#if showAddSwimlane}
 	<AddSwimlaneDialog onSubmit={handleAddSwimlane} onClose={() => (showAddSwimlane = false)} />
+{/if}
+
+{#if showAddJob}
+	<AddJobDialog onSubmit={handleAddJob} onClose={() => (showAddJob = false)} />
 {/if}

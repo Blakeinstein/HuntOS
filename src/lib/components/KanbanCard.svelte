@@ -7,7 +7,9 @@
 		CalendarIcon,
 		ExternalLinkIcon,
 		PlayIcon,
-		LoaderCircleIcon
+		LoaderCircleIcon,
+		PencilLineIcon,
+		BookmarkIcon
 	} from '@lucide/svelte';
 	import type { ApplicationWithSwimlane, PipelineRun } from '$lib/services/types';
 	import ApplyConflictDialog from './ApplyConflictDialog.svelte';
@@ -247,6 +249,15 @@
 			<span>{formattedDate}</span>
 		</div>
 		<div class="flex items-center gap-1">
+			{#if application.manually_added}
+				<span
+					class="badge flex items-center gap-0.5 preset-tonal-secondary text-[10px]"
+					title="Added manually"
+				>
+					<PencilLineIcon class="size-2.5" />
+					manual
+				</span>
+			{/if}
 			{#if missingFieldsCount > 0}
 				<span class="badge preset-filled-warning-500 text-[10px]">
 					{missingFieldsCount} missing
@@ -261,10 +272,16 @@
 		</div>
 	</div>
 
-	<!-- Apply button for backlog items -->
+	<!-- Apply button / tracking hint for backlog items -->
 	{#if isBacklog}
 		<div class="mt-2 border-t border-surface-200-800 pt-2">
-			{#if isQueued}
+			{#if !application.job_description_url}
+				<!-- No URL — auto-apply is impossible; show a tracking-only hint -->
+				<div class="flex items-center gap-1.5 text-xs opacity-40">
+					<BookmarkIcon class="size-3.5 shrink-0" />
+					<span>Tracking only — no job URL to auto-apply</span>
+				</div>
+			{:else if isQueued}
 				<!-- Queued state -->
 				<div class="flex items-center justify-between gap-2">
 					<div class="flex items-center gap-1.5 text-xs text-tertiary-500">

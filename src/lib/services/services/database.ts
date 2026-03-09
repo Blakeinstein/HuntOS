@@ -420,7 +420,9 @@ export class Database {
 			`ALTER TABLE job_boards ADD COLUMN page_retention_days INTEGER NOT NULL DEFAULT 3`,
 			// Work-authorization fields are stored as profile key/value rows — no schema change needed.
 			// link_summaries error_message column (added after initial release)
-			`ALTER TABLE link_summaries ADD COLUMN error_message TEXT`
+			`ALTER TABLE link_summaries ADD COLUMN error_message TEXT`,
+			// manually_added flag — distinguishes hand-entered jobs from auto-scraped ones
+			`ALTER TABLE applications ADD COLUMN manually_added BOOLEAN NOT NULL DEFAULT 0`
 		];
 
 		for (const sql of migrations) {

@@ -8,6 +8,7 @@ export interface Application {
 	job_description_url?: string;
 	job_description?: string;
 	status_swimlane_id: number;
+	manually_added: boolean;
 	created_at: string;
 	updated_at: string;
 	last_activity?: string;
@@ -60,6 +61,7 @@ export class ApplicationService {
         a.job_description_url,
         a.job_description,
         a.status_swimlane_id,
+        a.manually_added,
         a.created_at,
         a.updated_at,
         a.last_activity,
@@ -78,6 +80,7 @@ export class ApplicationService {
         a.job_description_url,
         a.job_description,
         a.status_swimlane_id,
+        a.manually_added,
         a.created_at,
         a.updated_at,
         a.last_activity,
@@ -111,6 +114,7 @@ export class ApplicationService {
         a.job_description_url,
         a.job_description,
         a.status_swimlane_id,
+        a.manually_added,
         a.created_at,
         a.updated_at,
         a.last_activity,
@@ -148,15 +152,23 @@ export class ApplicationService {
 		job_description_url?: string;
 		job_description?: string;
 		initialSwimlaneId?: number;
+		manually_added?: boolean;
 	}): Promise<number> {
-		const { title, company, job_description_url, job_description, initialSwimlaneId } = data;
+		const {
+			title,
+			company,
+			job_description_url,
+			job_description,
+			initialSwimlaneId,
+			manually_added
+		} = data;
 
 		const defaultSwimlaneId = initialSwimlaneId || (await this.getDefaultBacklogSwimlaneId());
 
 		const now = nowIso();
 		const sql = `
-      INSERT INTO applications (title, company, job_description_url, job_description, status_swimlane_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO applications (title, company, job_description_url, job_description, status_swimlane_id, manually_added, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
 		const result = await this.db.run(sql, [
@@ -165,6 +177,7 @@ export class ApplicationService {
 			job_description_url || null,
 			job_description || null,
 			defaultSwimlaneId,
+			manually_added ? 1 : 0,
 			now,
 			now
 		]);
@@ -252,6 +265,49 @@ export class ApplicationService {
     `,
 			[applicationId]
 		);
+	}
+
+	/**
+	 * Update core application fields (title, company, URL, description).
+	 * Only the fields that are explicitly passed will be updated.
+	 */
+	async updateApplication(
+		applicationId: number,
+		data: {
+			title?: string;
+			company?: string;
+			job_description_url?: string | null;
+			job_description?: string | null;
+		}
+	): Promise<void> {
+		const setClauses: string[] = [];
+		const values: unknown[] = [];
+
+		if (data.title !== undefined) {
+			setClauses.push('title = ?');
+			values.push(data.title);
+		}
+		if (data.company !== undefined) {
+			setClauses.push('company = ?');
+			values.push(data.company);
+		}
+		if (data.job_description_url !== undefined) {
+			setClauses.push('job_description_url = ?');
+			values.push(data.job_description_url ?? null);
+		}
+		if (data.job_description !== undefined) {
+			setClauses.push('job_description = ?');
+			values.push(data.job_description ?? null);
+		}
+
+		if (setClauses.length === 0) return;
+
+		const now = nowIso();
+		setClauses.push('updated_at = ?');
+		values.push(now);
+		values.push(applicationId);
+
+		await this.db.run(`UPDATE applications SET ${setClauses.join(', ')} WHERE id = ?`, values);
 	}
 
 	/**

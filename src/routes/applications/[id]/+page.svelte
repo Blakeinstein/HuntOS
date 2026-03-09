@@ -15,6 +15,7 @@
 		CheckCircleIcon,
 		CircleDotIcon,
 		PencilIcon,
+		SquarePenIcon,
 		TrashIcon,
 		StickyNoteIcon,
 		RocketIcon,
@@ -22,6 +23,7 @@
 		LoaderCircleIcon
 	} from '@lucide/svelte';
 	import ApplyProgressPanel from '$lib/components/ApplyProgressPanel.svelte';
+	import EditJobDialog from '$lib/components/EditJobDialog.svelte';
 	import type { PipelineRun, ApplicationResource, PipelineStepLog } from '$lib/services/types';
 
 	let { data } = $props();
@@ -53,6 +55,7 @@
 	let isDeleting = $state(false);
 	let isStartingApply = $state(false);
 	let applyError = $state<string | null>(null);
+	let showEditDialog = $state(false);
 
 	const isBacklog = $derived(application?.swimlane_name?.toLowerCase() === 'backlog');
 	const isActionRequired = $derived(
@@ -138,6 +141,29 @@
 		await goto(resolve('/applications'));
 	}
 
+	async function handleEdit(data: {
+		title: string;
+		company: string;
+		job_description_url?: string;
+		job_description?: string;
+	}) {
+		if (!application) return;
+
+		const response = await fetch(`/api/applications/${application.id}`, {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(data)
+		});
+
+		if (!response.ok) {
+			const body = await response.json();
+			throw new Error(body.error ?? 'Failed to save changes.');
+		}
+
+		showEditDialog = false;
+		await invalidate(`db:application:${application.id}`);
+	}
+
 	async function handleApply(resumeFrom?: string) {
 		if (!application || isStartingApply) return;
 
@@ -218,6 +244,14 @@
 						{/if}
 					</button>
 				{/if}
+				<button
+					type="button"
+					class="btn-icon preset-tonal"
+					title="Edit job opening"
+					onclick={() => (showEditDialog = true)}
+				>
+					<SquarePenIcon class="size-4" />
+				</button>
 				<button
 					type="button"
 					class="btn-icon preset-filled-error-500"
@@ -549,4 +583,8 @@
 			<a href={resolve('/applications')} class="mt-4 btn preset-tonal">Back to Roadmap</a>
 		</div>
 	</div>
+{/if}
+
+{#if showEditDialog && application}
+	<EditJobDialog {application} onSubmit={handleEdit} onClose={() => (showEditDialog = false)} />
 {/if}
