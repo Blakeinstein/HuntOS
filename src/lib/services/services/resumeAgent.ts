@@ -24,7 +24,7 @@ export type ResumeFormat = 'markdown' | 'typst';
 export interface ResumeAgentInput {
 	/** Pre-serialised plain-text representation of the candidate profile */
 	profileText: string;
-	/** Full text of the target job posting */
+	/** Full text of the target job posting — injected into the system prompt via dynamic context */
 	jobDescription: string;
 	/** Determines which schema and format instructions are injected */
 	format: ResumeFormat;
@@ -35,6 +35,12 @@ export interface ResumeAgentInput {
 	 * semantic search. When omitted, the prompt contains only the base profile.
 	 */
 	linkSummariesContext?: string;
+	/**
+	 * The human-turn message that kicks off the generation.
+	 * Defaults to a standard instruction to produce a tailored resume from the
+	 * profile and job description already present in the system context.
+	 */
+	bootstrapMessage?: string;
 }
 
 // Discriminated union so callers get typed data back without casting
@@ -88,13 +94,23 @@ export class ResumeAgentService {
 
 		const agent = this.mastra.getAgentById('resume-agent');
 
-		const prompt = buildPrompt(profileText, jobDescription, input.linkSummariesContext);
+		// Build the human-turn message. The JD lives in the system context (injected
+		// below via RequestContext) so the human turn only needs the profile and the
+		// bootstrap instruction to trigger completion.
+		const humanMessage = buildHumanMessage(
+			profileText,
+			input.bootstrapMessage,
+			input.linkSummariesContext
+		);
 
-		// Inject format instructions via RequestContext so the agent's
-		// dynamicContext function can read them from requestContext.get(…).
-		const requestContext = new RequestContext([['format-instructions', formatInstructions]]);
+		// Inject format instructions and the job description via RequestContext so
+		// the agent's dynamicContext function can read them from requestContext.get(…).
+		const requestContext = new RequestContext([
+			['format-instructions', formatInstructions],
+			['job-description', jobDescription]
+		]);
 
-		const agentResult = await agent.generate(prompt, {
+		const agentResult = await agent.generate(humanMessage, {
 			structuredOutput: {
 				schema: format === 'markdown' ? resumeDataSchema : typstResumeDataSchema
 			},
@@ -127,25 +143,27 @@ export class ResumeAgentService {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
+/** Default bootstrap message used when no custom one is provided. */
+export const DEFAULT_BOOTSTRAP_MESSAGE =
+	'Please generate a tailored, ATS-friendly resume for the job description provided. ' +
+	'Use the candidate profile and any link summaries to highlight the most relevant ' +
+	'experience, skills, and accomplishments. Return only the structured output.';
+
 /**
- * Assemble the single-shot prompt sent to the agent.
- * The agent receives the profile and job description; format instructions
- * are injected separately via dynamic context so they stay decoupled.
+ * Assemble the human-turn message sent to the agent.
+ *
+ * The job description is now part of the system prompt (injected via
+ * RequestContext / dynamicContext), so the human turn only needs:
+ *   1. The candidate profile.
+ *   2. Optional link-summary context.
+ *   3. The bootstrap instruction that triggers structured output.
  */
-function buildPrompt(
+function buildHumanMessage(
 	profileText: string,
-	jobDescription: string,
+	bootstrapMessage?: string,
 	linkSummariesContext?: string
 ): string {
-	const parts: string[] = [
-		'## Candidate Profile',
-		'',
-		profileText.trim(),
-		'',
-		'## Job Description',
-		'',
-		jobDescription.trim()
-	];
+	const parts: string[] = ['## Candidate Profile', '', profileText.trim()];
 
 	if (linkSummariesContext && linkSummariesContext.trim().length > 0) {
 		parts.push(
@@ -160,6 +178,8 @@ function buildPrompt(
 			linkSummariesContext.trim()
 		);
 	}
+
+	parts.push('', '---', '', bootstrapMessage?.trim() || DEFAULT_BOOTSTRAP_MESSAGE);
 
 	return parts.join('\n');
 }

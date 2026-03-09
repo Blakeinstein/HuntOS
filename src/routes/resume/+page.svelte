@@ -14,20 +14,29 @@
 		Trash2Icon,
 		RotateCcwIcon,
 		XIcon,
-		MessageSquareIcon,
 		HistoryIcon,
-		DownloadIcon
+		DownloadIcon,
+		TagIcon,
+		MessageCircleIcon,
+		CodeIcon
 	} from '@lucide/svelte';
 	import { Tabs } from '@skeletonlabs/skeleton-svelte';
-	import ResumeChat from '$lib/components/ResumeChat.svelte';
+	import JobDescriptionEditorModal from '$lib/components/JobDescriptionEditorModal.svelte';
 	import TemplateEditorModal from '$lib/components/TemplateEditorModal.svelte';
 	import CartaEditor from '$lib/components/CartaEditor.svelte';
 	import ResumeHistory from '$lib/components/ResumeHistory.svelte';
 
+	const DEFAULT_BOOTSTRAP_MESSAGE =
+		'Please generate a tailored, ATS-friendly resume for the job description provided. ' +
+		'Use the candidate profile and any link summaries to highlight the most relevant ' +
+		'experience, skills, and accomplishments. Return only the structured output.';
+
 	let { data } = $props();
 
 	// ── Generate tab state ───────────────────────────────────────
+	let resumeName = $state('');
 	let jobDescription = $state('');
+	let bootstrapMessage = $state(DEFAULT_BOOTSTRAP_MESSAGE);
 	let generatedFormat = $state<'markdown' | 'typst'>('markdown');
 	let generatedMarkdown = $state('');
 	let generatedYaml = $state('');
@@ -48,7 +57,8 @@
 	const resumeFormat = $derived(data.resumeFormat ?? 'markdown');
 
 	// ── Templates tab state ──────────────────────────────────────
-	let activeTab = $state('chat');
+	let activeTab = $state('generate');
+	let jdEditorOpen = $state(false);
 	let modalTemplate = $state<{
 		id: number;
 		name: string;
@@ -70,7 +80,10 @@
 	const effectiveTemplateId = $derived(selectedTemplateId ?? defaultTemplateId);
 
 	const canGenerate = $derived(
-		jobDescription.trim().length > 0 && !isGenerating && data.hasProfile
+		jobDescription.trim().length > 0 &&
+			bootstrapMessage.trim().length > 0 &&
+			!isGenerating &&
+			data.hasProfile
 	);
 
 	// ── Generate ─────────────────────────────────────────────────
@@ -90,8 +103,12 @@
 		try {
 			const body: Record<string, unknown> = {
 				jobDescription: jobDescription.trim(),
+				bootstrapMessage: bootstrapMessage.trim() || DEFAULT_BOOTSTRAP_MESSAGE,
 				generatePdf: true
 			};
+			if (resumeName.trim()) {
+				body.resumeName = resumeName.trim();
+			}
 			// Only send templateId for markdown mode
 			if (resumeFormat === 'markdown' && effectiveTemplateId) {
 				body.templateId = effectiveTemplateId;
@@ -298,13 +315,9 @@
 		</div>
 	{/if}
 
-	<!-- Tabs: AI Chat | Quick Generate | History | Templates -->
-	<Tabs value={activeTab} onValueChange={(details) => (activeTab = details.value ?? 'chat')}>
+	<!-- Tabs: Quick Generate | History | Templates -->
+	<Tabs value={activeTab} onValueChange={(details) => (activeTab = details.value ?? 'generate')}>
 		<Tabs.List>
-			<Tabs.Trigger value="chat">
-				<MessageSquareIcon class="mr-1.5 size-4" />
-				AI Writer
-			</Tabs.Trigger>
 			<Tabs.Trigger value="generate">
 				<SparklesIcon class="mr-1.5 size-4" />
 				Quick Generate
@@ -334,32 +347,86 @@
 			<Tabs.Indicator />
 		</Tabs.List>
 
-		<!-- ═══ AI Chat Tab ═══ -->
-		<Tabs.Content value="chat">
-			<div class="mt-4">
-				<ResumeChat />
-			</div>
-		</Tabs.Content>
-
 		<!-- ═══ Quick Generate Tab ═══ -->
 		<Tabs.Content value="generate">
 			<div class="mt-4 grid gap-6 lg:grid-cols-2">
-				<!-- Left: Job Description Input + Options -->
-				<div class="space-y-4 card border border-surface-200-800 bg-surface-50-950 p-5">
-					<h2 class="flex items-center gap-2 text-sm font-bold">
-						<FileTextIcon class="size-4 text-primary-500" />
-						Job Description
-					</h2>
+				<!-- Left: Inputs -->
+				<div class="space-y-5 card border border-surface-200-800 bg-surface-50-950 p-5">
+					<!-- Resume Name -->
+					<div class="space-y-1.5">
+						<label for="resume-name" class="flex items-center gap-2 text-sm font-bold">
+							<TagIcon class="size-4 text-primary-500" />
+							Resume Name
+						</label>
+						<input
+							id="resume-name"
+							type="text"
+							class="input text-sm"
+							placeholder="e.g. Senior Engineer @ Acme Corp"
+							bind:value={resumeName}
+							disabled={isGenerating}
+						/>
+						<p class="text-xs opacity-40">
+							Used as the title in history and audit logs, and as the output file name.
+						</p>
+					</div>
 
-					<textarea
-						class="textarea min-h-60 font-mono text-sm"
-						placeholder="Paste the full job description here...
+					<!-- Job Description (system prompt context) -->
+					<div class="space-y-1.5">
+						<div class="flex items-center justify-between">
+							<label for="job-description" class="flex items-center gap-2 text-sm font-bold">
+								<FileTextIcon class="size-4 text-primary-500" />
+								Job Description
+							</label>
+							<button
+								type="button"
+								class="btn gap-1.5 preset-tonal btn-sm"
+								onclick={() => (jdEditorOpen = true)}
+								disabled={isGenerating}
+								title="Open Markdown editor"
+							>
+								<CodeIcon class="size-3.5" />
+								<span class="text-xs">MD</span>
+							</button>
+						</div>
 
-Example:
-We are looking for a Senior Software Engineer with 5+ years of experience in TypeScript, React, and Node.js. The ideal candidate will have experience with distributed systems..."
-						bind:value={jobDescription}
-						disabled={isGenerating}
-					></textarea>
+						<textarea
+							id="job-description"
+							class="textarea min-h-52 font-mono text-sm"
+							placeholder="Paste the full job description here…
+
+We are looking for a Senior Software Engineer with 5+ years of TypeScript, React, and Node.js experience…"
+							bind:value={jobDescription}
+							disabled={isGenerating}
+						></textarea>
+
+						<p class="text-xs opacity-40">
+							Injected into the system prompt — the model uses this to tailor the resume to the
+							role.
+							{#if jobDescription.trim().length > 0}
+								<span class="ml-1 opacity-70"
+									>{jobDescription.trim().split(/\s+/).length} words</span
+								>
+							{/if}
+						</p>
+					</div>
+
+					<!-- Bootstrap Message (human turn) -->
+					<div class="space-y-1.5">
+						<label for="bootstrap-message" class="flex items-center gap-2 text-sm font-bold">
+							<MessageCircleIcon class="size-4 text-primary-500" />
+							Bootstrap Message
+						</label>
+						<textarea
+							id="bootstrap-message"
+							class="textarea min-h-24 text-sm"
+							bind:value={bootstrapMessage}
+							disabled={isGenerating}
+						></textarea>
+						<p class="text-xs opacity-40">
+							The human-turn message that triggers the model. Modify to steer tone or emphasis.
+						</p>
+					</div>
 
 					<!-- Template picker — only for markdown mode -->
 					{#if resumeFormat === 'markdown'}
@@ -387,13 +454,7 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 						</div>
 					{/if}
 
-					<div class="flex items-center justify-between">
-						<span class="text-xs opacity-50">
-							{jobDescription.trim().length > 0
-								? `${jobDescription.trim().split(/\s+/).length} words`
-								: 'No content yet'}
-						</span>
-
+					<div class="flex items-center justify-end">
 						<button
 							type="button"
 							class="btn gap-2 preset-filled-primary-500"
@@ -769,6 +830,10 @@ We are looking for a Senior Software Engineer with 5+ years of experience in Typ
 </div>
 
 <!-- Template editor modal -->
+{#if jdEditorOpen}
+	<JobDescriptionEditorModal bind:value={jobDescription} onClose={() => (jdEditorOpen = false)} />
+{/if}
+
 {#if modalTemplate}
 	<TemplateEditorModal
 		template={modalTemplate}

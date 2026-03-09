@@ -17,7 +17,13 @@ export async function POST({ request }) {
 	});
 
 	try {
-		const { jobDescription, templateId, resumeName, generatePdf = true } = await request.json();
+		const {
+			jobDescription,
+			templateId,
+			resumeName,
+			bootstrapMessage,
+			generatePdf = true
+		} = await request.json();
 
 		if (
 			!jobDescription ||
@@ -35,13 +41,14 @@ export async function POST({ request }) {
 		const resumeFormat = services.appSettingsService.resumeFormat;
 
 		if (resumeFormat === 'typst') {
-			return await handleTypstGeneration(jobDescription, resumeName, finishAudit);
+			return await handleTypstGeneration(jobDescription, resumeName, bootstrapMessage, finishAudit);
 		}
 
 		return await handleMarkdownGeneration(
 			jobDescription,
 			templateId,
 			resumeName,
+			bootstrapMessage,
 			generatePdf,
 			finishAudit
 		);
@@ -65,12 +72,14 @@ async function handleMarkdownGeneration(
 	jobDescription: string,
 	templateId: number | undefined,
 	resumeName: string | undefined,
+	bootstrapMessage: string | undefined,
 	generatePdf: boolean,
 	finishAudit: ReturnType<typeof services.auditLogService.start>
 ) {
 	const result = await services.resumeGenerationService.generate(
 		jobDescription,
-		templateId ? Number(templateId) : undefined
+		templateId ? Number(templateId) : undefined,
+		bootstrapMessage
 	);
 
 	const name = resumeName || deriveResumeName(result.data?.name || 'Resume', jobDescription);
@@ -137,9 +146,10 @@ async function handleMarkdownGeneration(
 async function handleTypstGeneration(
 	jobDescription: string,
 	resumeName: string | undefined,
+	bootstrapMessage: string | undefined,
 	finishAudit: ReturnType<typeof services.auditLogService.start>
 ) {
-	const result = await services.typstResumeService.generate(jobDescription);
+	const result = await services.typstResumeService.generate(jobDescription, bootstrapMessage);
 
 	const name =
 		resumeName || deriveResumeName(result.data.personal.name || 'Resume', jobDescription);

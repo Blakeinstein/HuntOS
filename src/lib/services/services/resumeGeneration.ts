@@ -101,7 +101,11 @@ export class ResumeGenerationService {
 	 * @param jobDescription  The full text of the target job posting.
 	 * @param templateId      Optional template id. Falls back to the default.
 	 */
-	async generate(jobDescription: string, templateId?: number): Promise<ResumeGenerationResult> {
+	async generate(
+		jobDescription: string,
+		templateId?: number,
+		bootstrapMessage?: string
+	): Promise<ResumeGenerationResult> {
 		const profile = await this.profileService.getProfile();
 		const profileText = ResumeGenerationService.profileToText(profile);
 
@@ -118,7 +122,8 @@ export class ResumeGenerationService {
 				profileText,
 				jobDescription,
 				format: 'markdown',
-				linkSummariesContext: linkSummariesContext || undefined
+				linkSummariesContext: linkSummariesContext || undefined,
+				bootstrapMessage
 			});
 			// TypeScript narrows the discriminated union
 			data = output.format === 'markdown' ? output.data : (output.data as unknown as ResumeData);

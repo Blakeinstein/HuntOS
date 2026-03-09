@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { CodeIcon } from '@lucide/svelte';
 	import type { FieldDef } from './profile.fields';
+	import MarkdownEditorModal from '$lib/components/MarkdownEditorModal.svelte';
 
 	interface Props {
 		field: FieldDef;
@@ -10,16 +12,44 @@
 	}
 
 	let { field, value, incomplete = false, layout = 'card', oninput }: Props = $props();
+
+	let mdOpen = $state(false);
+	let modalValue = $state('');
+
+	function openModal() {
+		modalValue = value;
+		mdOpen = true;
+	}
+
+	function handleModalClose() {
+		mdOpen = false;
+		if (modalValue !== value) {
+			oninput(field.key, modalValue);
+		}
+	}
 </script>
 
 {#if layout === 'card'}
 	<div class="card border border-surface-200-800 bg-surface-50-950 p-5">
 		<label class="label">
-			<span class="flex items-center gap-1.5 text-sm font-bold">
-				<field.icon class="size-4 text-primary-500" />
-				{field.label}
-				{#if incomplete}
-					<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
+			<span class="flex items-center justify-between gap-1.5">
+				<span class="flex items-center gap-1.5 text-sm font-bold">
+					<field.icon class="size-4 text-primary-500" />
+					{field.label}
+					{#if incomplete}
+						<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
+					{/if}
+				</span>
+				{#if field.type === 'textarea'}
+					<button
+						type="button"
+						class="btn gap-1.5 preset-tonal btn-sm"
+						onclick={openModal}
+						title="Open Markdown editor"
+					>
+						<CodeIcon class="size-3.5" />
+						<span class="text-xs">MD</span>
+					</button>
 				{/if}
 			</span>
 			{#if field.hint}
@@ -59,11 +89,24 @@
 	</div>
 {:else}
 	<label class="label">
-		<span class="flex items-center gap-1.5 text-sm font-medium">
-			<field.icon class="size-3.5 opacity-50" />
-			{field.label}
-			{#if incomplete}
-				<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
+		<span class="flex items-center justify-between gap-1.5">
+			<span class="flex items-center gap-1.5 text-sm font-medium">
+				<field.icon class="size-3.5 opacity-50" />
+				{field.label}
+				{#if incomplete}
+					<span class="badge preset-filled-warning-500 text-[10px]">Required</span>
+				{/if}
+			</span>
+			{#if field.type === 'textarea'}
+				<button
+					type="button"
+					class="btn gap-1.5 preset-tonal btn-sm"
+					onclick={openModal}
+					title="Open Markdown editor"
+				>
+					<CodeIcon class="size-3.5" />
+					<span class="text-xs">MD</span>
+				</button>
 			{/if}
 		</span>
 		{#if field.hint}
@@ -102,4 +145,14 @@
 			{/if}
 		</div>
 	</label>
+{/if}
+
+{#if mdOpen}
+	<MarkdownEditorModal
+		bind:value={modalValue}
+		title={field.label}
+		icon={field.icon}
+		placeholder={field.placeholder ?? ''}
+		onClose={handleModalClose}
+	/>
 {/if}

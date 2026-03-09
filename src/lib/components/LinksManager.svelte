@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import SummaryEditorModal from '$lib/components/SummaryEditorModal.svelte';
 	import {
 		LinkIcon,
 		PlusIcon,
@@ -66,8 +67,8 @@
 		}
 	});
 
-	// Track which links have their summary panel expanded
-	const expandedSummaries = new SvelteSet<string>();
+	// Track which link's summary modal is open (normalised title, or null)
+	let openSummaryTitle = $state<string | null>(null);
 
 	// Track in-flight summarise requests (by normalised title)
 	const summarising = new SvelteSet<string>();
@@ -185,17 +186,25 @@
 		}
 	}
 
-	function toggleSummaryPanel(title: string) {
-		const key = title.toLowerCase();
-		if (expandedSummaries.has(key)) {
-			expandedSummaries.delete(key);
-		} else {
-			expandedSummaries.add(key);
-		}
+	function openSummaryModal(title: string) {
+		openSummaryTitle = title.toLowerCase();
 	}
 
-	function isSummaryExpanded(title: string): boolean {
-		return expandedSummaries.has(title.toLowerCase());
+	function closeSummaryModal() {
+		openSummaryTitle = null;
+	}
+
+	async function saveSummary(title: string, newSummary: string) {
+		const res = await fetch('/api/profiles/links/summarize', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ title, summary: newSummary })
+		});
+		const data = await res.json();
+		if (!res.ok) throw new Error(data.error ?? 'Failed to save summary');
+		if (data.summary) {
+			localSummaries.set(title.toLowerCase(), data.summary as LinkSummary);
+		}
 	}
 
 	// ── Links CRUD ───────────────────────────────────────────────────
@@ -419,7 +428,6 @@
 				{@const isJobActive =
 					isEnqueuing || summary?.status === 'pending' || summary?.status === 'running'}
 				{@const hasSummary = summary?.status === 'done' && !!summary.summary}
-				{@const summaryExpanded = isSummaryExpanded(link.title)}
 
 				{#if editingId === link.id}
 					<!-- Inline edit form -->
@@ -625,15 +633,15 @@
 									</button>
 								{/if}
 
-								<!-- View summary toggle -->
+								<!-- View / edit summary modal trigger -->
 								{#if hasSummary}
 									<button
 										type="button"
 										class="btn gap-1 preset-outlined-surface-500 btn-sm"
-										title={summaryExpanded ? 'Hide summary' : 'View summary'}
-										onclick={() => toggleSummaryPanel(link.title)}
+										title="View and edit summary"
+										onclick={() => openSummaryModal(link.title)}
 									>
-										{summaryExpanded ? 'Hide' : 'View'}
+										View
 									</button>
 								{/if}
 
@@ -658,27 +666,23 @@
 								</button>
 							</div>
 						</div>
-
-						<!-- Expandable summary panel -->
-						{#if summaryExpanded && hasSummary}
-							<div class="border-t border-surface-200-800 bg-surface-100-900 px-4 pt-3 pb-4">
-								<div class="mb-2 flex items-center justify-between">
-									<p class="text-xs font-semibold opacity-60">AI Summary</p>
-									{#if summary?.generated_at}
-										<p class="flex items-center gap-1 text-[10px] opacity-40">
-											<ClockIcon class="size-3" />
-											Generated {formatRelativeTime(summary.generated_at)}
-										</p>
-									{/if}
-								</div>
-								<pre
-									class="max-h-64 overflow-y-auto rounded-md bg-surface-200-800 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{summary!
-										.summary}</pre>
-							</div>
-						{/if}
 					</div>
 				{/if}
 			{/each}
 		</div>
 	{/if}
 </div>
+
+<!-- Summary editor modal -->
+{#if openSummaryTitle}
+	{@const activeSummary = localSummaries.get(openSummaryTitle)}
+	{#if activeSummary}
+		<SummaryEditorModal
+			title={activeSummary.link_title}
+			summary={activeSummary.summary}
+			generatedAt={activeSummary.generated_at}
+			onSave={(newSummary) => saveSummary(activeSummary.link_title, newSummary)}
+			onClose={closeSummaryModal}
+		/>
+	{/if}
+{/if}

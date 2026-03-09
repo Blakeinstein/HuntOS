@@ -47,8 +47,13 @@ export function createResumeAgent(deps: ResumeAgentDeps) {
 				createSearchLinkSummariesTool(linkSummaryVectorService, auditLogService)
 			)
 		},
-		dynamicContext: ({ requestContext }) => ({
-			'Output Format Instructions': requestContext.get('format-instructions') ?? ''
-		})
+		dynamicContext: ({ requestContext }) => {
+			const ctx: Record<string, string> = {
+				'Output Format Instructions': (requestContext.get('format-instructions') as string) ?? ''
+			};
+			const jd = requestContext.get('job-description') as string | undefined;
+			if (jd) ctx['Job Description'] = jd;
+			return ctx;
+		}
 	});
 }

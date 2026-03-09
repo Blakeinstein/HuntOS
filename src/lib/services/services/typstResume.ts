@@ -104,7 +104,7 @@ export class TypstResumeService {
 	 *
 	 * @param jobDescription  Full text of the target job posting.
 	 */
-	async generate(jobDescription: string): Promise<TypstResumeResult> {
+	async generate(jobDescription: string, bootstrapMessage?: string): Promise<TypstResumeResult> {
 		const profile = await this.profileService.getProfile();
 		const profileText = ResumeGenerationService.profileToText(profile);
 
@@ -121,7 +121,8 @@ export class TypstResumeService {
 				profileText,
 				jobDescription,
 				format: 'typst',
-				linkSummariesContext: linkSummariesContext || undefined
+				linkSummariesContext: linkSummariesContext || undefined,
+				bootstrapMessage
 			});
 			data = output.format === 'typst' ? output.data : (output.data as unknown as TypstResumeData);
 		} else {

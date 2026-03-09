@@ -151,6 +151,10 @@
 		min-height: 100%;
 	}
 
+	.carta-tab-write :global(.carta-input) {
+		height: 100%;
+	}
+
 	/* Hide Carta's built-in tab bar — we manage tabs ourselves */
 	.carta-tab-write :global(.carta-toolbar) {
 		border-bottom: 1px solid rgba(128, 128, 128, 0.2);
@@ -171,22 +175,30 @@
 		padding: 0;
 	}
 
+	/* ── Explicit text color — Carta never sets `color` on the textarea,
+	      so it can render invisible if the inherited color chain breaks.
+	      Wire it directly to --text-color so light and dark both work. */
+	:global(.carta-theme__default .carta-input) {
+		color: var(--text-color, #1a1a1a);
+	}
+
 	/* ── Dark mode: Carta default theme ────────────────────────── */
-	:global(.dark .carta-theme__default),
-	:global([data-theme='dark'] .carta-theme__default) {
-		--border-color: var(--border-color-dark, rgba(255, 255, 255, 0.1));
-		--selection-color: var(--selection-color-dark, rgba(100, 100, 255, 0.3));
-		--focus-outline: var(--focus-outline-dark, rgba(100, 100, 255, 0.5));
-		--hover-color: var(--hover-color-dark, rgba(255, 255, 255, 0.05));
-		--caret-color: var(--caret-color-dark, white);
-		--text-color: var(--text-color-dark, rgba(255, 255, 255, 0.9));
+	@media (prefers-color-scheme: dark) {
+		:global(.carta-theme__default) {
+			--border-color: var(--border-color-dark, rgba(255, 255, 255, 0.1));
+			--selection-color: var(--selection-color-dark, rgba(100, 100, 255, 0.3));
+			--focus-outline: var(--focus-outline-dark, rgba(100, 100, 255, 0.5));
+			--hover-color: var(--hover-color-dark, rgba(255, 255, 255, 0.05));
+			--caret-color: var(--caret-color-dark, white);
+			--text-color: var(--text-color-dark, rgba(255, 255, 255, 0.9));
+		}
 	}
 
 	/* ── Dark mode: Shiki syntax highlighting ──────────────────── */
-	:global(.dark .shiki),
-	:global(.dark .shiki span),
-	:global([data-theme='dark'] .shiki),
-	:global([data-theme='dark'] .shiki span) {
-		color: var(--shiki-dark) !important;
+	@media (prefers-color-scheme: dark) {
+		:global(.shiki),
+		:global(.shiki span) {
+			color: var(--shiki-dark) !important;
+		}
 	}
 </style>

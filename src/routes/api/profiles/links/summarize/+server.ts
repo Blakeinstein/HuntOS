@@ -61,3 +61,36 @@ export async function POST({ request }) {
 		return json({ error: message }, { status: 500 });
 	}
 }
+
+/**
+ * PATCH /api/profiles/links/summarize
+ * Update the summary text for an existing link summary (manual edit).
+ *
+ * Body: { title: string; summary: string }
+ */
+export async function PATCH({ request }) {
+	try {
+		const body = await request.json();
+		const { title, summary } = body ?? {};
+
+		if (!title || typeof title !== 'string') {
+			return json({ error: 'Missing required field: title' }, { status: 400 });
+		}
+		if (typeof summary !== 'string') {
+			return json({ error: 'Missing required field: summary' }, { status: 400 });
+		}
+
+		const existing = services.linkSummaryService.getByTitle(title);
+		if (!existing) {
+			return json({ error: `No summary found for "${title}"` }, { status: 404 });
+		}
+
+		services.linkSummaryService.markDone(title, summary);
+		const updated = services.linkSummaryService.getByTitle(title);
+
+		return json({ summary: updated });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to update summary';
+		return json({ error: message }, { status: 500 });
+	}
+}
