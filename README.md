@@ -33,6 +33,14 @@ HuntOS is a local-first, agent-driven job application platform. It combines a Sv
 
 ---
 
+## Usage Guide
+
+1.  **Install Bun:** Ensure you have the `bun` runtime installed locally.
+2.  **Install Chrome:** You’ll need `google-chrome-stable` for the browser automation.
+3.  **Start it up:** Run the `bun start` script. You should see a Chrome instance launch.
+4.  **Login:** In that specific Chrome instance, log in to your LinkedIn account.
+5.  **Navigate:** Go to the HuntOS landing page (`http://localhost:5173`) in your local browser and follow the onboarding instructions.
+
 ## Prerequisites
 
 | Requirement | Notes |
