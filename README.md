@@ -24,7 +24,7 @@ HuntOS is a local-first, agent-driven job application platform. It combines a Sv
 
 | Capability | Details |
 |---|---|
-| **Job board scraping** | LinkedIn, Greenhouse, and generic boards |
+| **Job board scraping** | LinkedIn, Greenhouse, generic boards, and optional [bluedoor](https://bluedoor.sh/apis/job-postings) job search URLs |
 | **Resume generation** | Agent-tailored Markdown + PDF per application |
 | **Browser automation** | Full CDP-driven form filling and submission |
 | **Kanban pipeline** | Track every application from research to offer |
@@ -170,6 +170,27 @@ Model strings use the format `<provider>/<model-id>`, e.g. `openrouter/qwen/qwen
 
 Provider wiring lives in `src/lib/mastra/providers/registry.ts`.
 
+### bluedoor job postings (optional)
+
+HuntOS can fetch structured jobs from the [bluedoor Job Postings API](https://bluedoor.sh/apis/job-postings/docs/) when a job board URL points at a search endpoint — no browser agent.
+
+**Auth:** no API key required (anonymous, rate-limited). Optional free API key via email signup at [bluedoor.sh/apis/job-postings](https://bluedoor.sh/apis/job-postings/) for higher rate limits.
+
+1. In **Settings → Job boards**, add a board whose **URL** is:
+
+   ```text
+   https://api.bluedoor.sh/job-postings/v1/jobs/search?q=typescript&workplace_type=remote&limit=25
+   ```
+
+2. Run a scrape (manually or via the scheduler). Results use the normal backlog pipeline; pagination follows API `cursor`.
+
+| Variable | Purpose |
+|---|---|
+| `BLUEDOOR_API_KEY` | Optional — higher rate limits |
+| `BLUEDOOR_USER_AGENT` | Optional User-Agent override for HTTP requests |
+
+LinkedIn and Greenhouse boards are unchanged — only URLs matching `api.bluedoor.sh/.../jobs/search` use this path.
+
 ---
 
 ## Application layout
@@ -179,6 +200,7 @@ src/
   lib/
     mastra/          # Mastra agents, tools, prompts, provider registry
     services/        # Backend services (DB, pipeline, email, job boards, …)
+    integrations/    # Optional third-party API clients (e.g. bluedoor)
     components/      # Shared Svelte components
     stores/          # Svelte stores
   routes/

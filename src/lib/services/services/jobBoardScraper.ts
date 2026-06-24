@@ -13,6 +13,8 @@ import {
 } from '$lib/mastra/agents/job-board-agent/index';
 import { extractJson } from '$lib/services/helpers/extractJson';
 import { logger } from '$lib/mastra/logger';
+import { BluedoorApiError, fetchBluedoorScrapeResult, isBluedoorUrl } from '$lib/integrations/bluedoor';
+import type { JobBoardConfig } from './jobBoard';
 
 export interface ScrapeJobBoardOptions {
 	/** The job board database ID */
@@ -154,6 +156,16 @@ export class JobBoardScraperService {
 		// If we have a resume URL from a previous session, start there.
 		// If the caller explicitly overrides the URL, use that instead.
 		const targetUrl = options.url ?? paginationState.resumePageUrl ?? jobBoard.base_url;
+
+		if (isBluedoorUrl(targetUrl) || isBluedoorUrl(jobBoard.base_url)) {
+			return this.scrapeBluedoor({
+				jobBoard,
+				jobBoardId: options.jobBoardId,
+				paginationState,
+				targetUrl: isBluedoorUrl(targetUrl) ? targetUrl : jobBoard.base_url,
+				resumePageUrl: paginationState.resumePageUrl
+			});
+		}
 
 		// Always resolve the sub-agent against the *base* URL so that pagination
 		// query params (e.g. &start=50) don't accidentally cause a routing mismatch.
@@ -516,5 +528,119 @@ export class JobBoardScraperService {
 		}
 
 		return { newApplications, duplicatesSkipped };
+	}
+
+	/**
+	 * Fetches jobs from the bluedoor Job Postings API when a board's base URL
+	 * points at `api.bluedoor.sh/.../jobs/search`. No browser agent is used.
+	 */
+	private async scrapeBluedoor(options: {
+		jobBoard: JobBoardConfig;
+		jobBoardId: number;
+		paginationState: PaginationState;
+		targetUrl: string;
+		resumePageUrl: string | null | undefined;
+	}): Promise<ScrapeJobBoardResult> {
+		const { jobBoard, jobBoardId, paginationState, targetUrl, resumePageUrl } = options;
+		const errors: string[] = [];
+
+		const finishAudit = this.auditLog.start({
+			category: 'scrape',
+			agent_id: 'integrations.bluedoor',
+			title: `Fetching ${jobBoard.name} (bluedoor)`,
+			detail: `Search URL: ${targetUrl}`,
+			meta: {
+				jobBoardId,
+				jobBoardName: jobBoard.name,
+				targetUrl,
+				source: 'bluedoor'
+			}
+		});
+
+		let scrapeResult: ScrapeResult | null = null;
+		let nextSearchUrl: string | null = null;
+
+		try {
+			const fetched = await fetchBluedoorScrapeResult({
+				boardBaseUrl: jobBoard.base_url,
+				resumePageUrl,
+				maxListings: paginationState.maxListings
+			});
+			scrapeResult = fetched.result;
+			nextSearchUrl = fetched.nextSearchUrl;
+		} catch (err) {
+			const message =
+				err instanceof BluedoorApiError
+					? err.message
+					: err instanceof Error
+						? err.message
+						: String(err);
+
+			errors.push(`bluedoor fetch failed: ${message}`);
+			finishAudit({
+				status: 'error',
+				detail: message,
+				meta: { jobBoardId, targetUrl, error: message }
+			});
+
+			return {
+				success: false,
+				newApplications: 0,
+				duplicatesSkipped: 0,
+				scrapeResult: null,
+				errors
+			};
+		}
+
+		const { newApplications, duplicatesSkipped } = await this.persistJobs(
+			jobBoardId,
+			scrapeResult.jobs,
+			errors
+		);
+
+		try {
+			await this.jobBoardService.updateLastChecked(jobBoardId, new Date().toISOString());
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			errors.push(`Failed to update lastRunAt: ${message}`);
+		}
+
+		try {
+			if (scrapeResult.has_more_pages && nextSearchUrl) {
+				await this.jobBoardService.updatePaginationState(jobBoardId, 2, nextSearchUrl);
+			} else {
+				await this.jobBoardService.resetPaginationState(jobBoardId);
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			errors.push(`Failed to update pagination state: ${message}`);
+		}
+
+		const overallSuccess = scrapeResult.success && errors.length === 0;
+
+		finishAudit({
+			status: overallSuccess ? 'success' : errors.length > 0 ? 'warning' : 'success',
+			detail: overallSuccess
+				? `Fetched ${scrapeResult.total_found} jobs — ${newApplications} new, ${duplicatesSkipped} duplicates skipped`
+				: `Completed with issues: ${errors.join('; ')}`,
+			meta: {
+				jobBoardId,
+				targetUrl,
+				totalFound: scrapeResult.total_found,
+				newApplications,
+				duplicatesSkipped,
+				hasMorePages: scrapeResult.has_more_pages,
+				nextSearchUrl,
+				errors: errors.length > 0 ? errors : undefined
+			}
+		});
+
+		return {
+			success: overallSuccess,
+			newApplications,
+			duplicatesSkipped,
+			scrapeResult,
+			errors
+		};
 	}
 }
